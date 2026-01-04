@@ -1,7 +1,7 @@
-import * as THREE from 'three';
-import { PerspectiveCamera } from 'three';
-import { Scene } from 'three';
-import { World, BLOCK } from '../World';
+import * as THREE from "three";
+import { PerspectiveCamera } from "three";
+import { Scene } from "three";
+import { World, BLOCK } from "../World";
 
 export class BlockBreaking {
   private crackMesh: THREE.Mesh;
@@ -18,7 +18,12 @@ export class BlockBreaking {
   private currentBreakId: number = 0;
 
   private getSelectedSlotItem: () => number;
-  private onBlockBreak?: (x: number, y: number, z: number, blockId: number) => void;
+  private onBlockBreak?: (
+    x: number,
+    y: number,
+    z: number,
+    blockId: number,
+  ) => void;
 
   constructor(
     scene: Scene,
@@ -26,7 +31,7 @@ export class BlockBreaking {
     controls: any,
     getSelectedSlotItem: () => number,
     onBlockBreak?: (x: number, y: number, z: number, blockId: number) => void,
-    cursorMesh?: THREE.Mesh
+    cursorMesh?: THREE.Mesh,
   ) {
     this.scene = scene;
     this.camera = camera;
@@ -38,7 +43,7 @@ export class BlockBreaking {
 
     // Create crack texture
     this.crackTexture = this.createCrackTexture();
-    
+
     // Create crack mesh
     const crackGeometry = new THREE.BoxGeometry(1.002, 1.002, 1.002);
     const crackMaterial = new THREE.MeshBasicMaterial({
@@ -47,7 +52,7 @@ export class BlockBreaking {
       depthTest: true,
       depthWrite: false,
       polygonOffset: true,
-      polygonOffsetFactor: -4
+      polygonOffsetFactor: -4,
     });
     this.crackMesh = new THREE.Mesh(crackGeometry, crackMaterial);
     this.crackMesh.visible = false;
@@ -56,10 +61,10 @@ export class BlockBreaking {
   }
 
   private createCrackTexture(): THREE.CanvasTexture {
-    const crackCanvas = document.createElement('canvas');
+    const crackCanvas = document.createElement("canvas");
     crackCanvas.width = 640; // 10 frames * 64px
     crackCanvas.height = 64;
-    const crackCtx = crackCanvas.getContext('2d')!;
+    const crackCtx = crackCanvas.getContext("2d")!;
     crackCtx.imageSmoothingEnabled = false;
 
     for (let i = 0; i < 10; i++) {
@@ -79,7 +84,7 @@ export class BlockBreaking {
           const noise = (Math.random() - 0.5) * 10;
 
           if (dist < currentDist + noise) {
-            crackCtx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            crackCtx.fillStyle = "rgba(0, 0, 0, 0.7)";
             crackCtx.fillRect(offsetX + x, y, pixelSize, pixelSize);
           }
         }
@@ -97,19 +102,28 @@ export class BlockBreaking {
     return this.crackMesh;
   }
 
+  public isBreakingNow(): boolean {
+    return this.isBreaking;
+  }
+
   public start(world: World): void {
     this.raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
-    const hit = this.raycaster.intersectObjects(this.scene.children).find(i =>
-      i.object !== this.cursorMesh &&
-      i.object !== this.crackMesh &&
-      i.object !== this.controls.object &&
-      (i.object as any).isMesh &&
-      !(i.object as any).isItem &&
-      !(i.object.parent as any)?.isMob
-    );
+    const hit = this.raycaster
+      .intersectObjects(this.scene.children)
+      .find(
+        (i) =>
+          i.object !== this.cursorMesh &&
+          i.object !== this.crackMesh &&
+          i.object !== this.controls.object &&
+          (i.object as any).isMesh &&
+          !(i.object as any).isItem &&
+          !(i.object.parent as any)?.isMob,
+      );
 
     if (hit && hit.distance < 6) {
-      const p = hit.point.clone().add(this.raycaster.ray.direction.clone().multiplyScalar(0.01));
+      const p = hit.point
+        .clone()
+        .add(this.raycaster.ray.direction.clone().multiplyScalar(0.01));
       const x = Math.floor(p.x);
       const y = Math.floor(p.y);
       const z = Math.floor(p.z);
@@ -137,23 +151,32 @@ export class BlockBreaking {
 
     // Check if still looking at same block
     this.raycaster.setFromCamera(new THREE.Vector2(0, 0), this.camera);
-    const hit = this.raycaster.intersectObjects(this.scene.children).find(i =>
-      i.object !== this.cursorMesh &&
-      i.object !== this.crackMesh &&
-      i.object !== this.controls.object &&
-      (i.object as any).isMesh &&
-      !(i.object as any).isItem &&
-      !(i.object.parent as any)?.isMob
-    );
+    const hit = this.raycaster
+      .intersectObjects(this.scene.children)
+      .find(
+        (i) =>
+          i.object !== this.cursorMesh &&
+          i.object !== this.crackMesh &&
+          i.object !== this.controls.object &&
+          (i.object as any).isMesh &&
+          !(i.object as any).isItem &&
+          !(i.object.parent as any)?.isMob,
+      );
 
     let lookingAtSame = false;
     if (hit && hit.distance < 6) {
-      const p = hit.point.clone().add(this.raycaster.ray.direction.clone().multiplyScalar(0.1));
+      const p = hit.point
+        .clone()
+        .add(this.raycaster.ray.direction.clone().multiplyScalar(0.1));
       const x = Math.floor(p.x);
       const y = Math.floor(p.y);
       const z = Math.floor(p.z);
 
-      if (x === this.currentBreakBlock.x && y === this.currentBreakBlock.y && z === this.currentBreakBlock.z) {
+      if (
+        x === this.currentBreakBlock.x &&
+        y === this.currentBreakBlock.y &&
+        z === this.currentBreakBlock.z
+      ) {
         lookingAtSame = true;
       }
     }
@@ -186,7 +209,7 @@ export class BlockBreaking {
       this.crackMesh.position.set(
         this.currentBreakBlock.x + 0.5,
         this.currentBreakBlock.y + 0.5,
-        this.currentBreakBlock.z + 0.5
+        this.currentBreakBlock.z + 0.5,
       );
 
       const frame = Math.floor(progress * 9);
@@ -194,4 +217,3 @@ export class BlockBreaking {
     }
   }
 }
-

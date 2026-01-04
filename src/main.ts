@@ -30,6 +30,12 @@ import { HotbarLabel } from "./ui/HotbarLabel";
 import { HealthBar } from "./ui/HealthBar";
 import { Renderer } from "./core/Renderer";
 import { GameState } from "./core/GameState";
+import { PlayerPhysics } from "./player/PlayerPhysics";
+import { PlayerHealth } from "./player/PlayerHealth";
+import { PlayerCombat } from "./player/PlayerCombat";
+import { BlockCursor } from "./blocks/BlockCursor";
+import { BlockBreaking } from "./blocks/BlockBreaking";
+import { BlockInteraction } from "./blocks/BlockInteraction";
 import "./style.css";
 
 // Tool Textures Registry
@@ -143,14 +149,7 @@ controls.addEventListener("unlock", () => {
 
 // controls.object already added to scene in Renderer constructor
 
-// Movement variables
-let moveForward = false;
-let moveBackward = false;
-let moveLeft = false;
-let moveRight = false;
-let isOnGround = false;
-
-const velocity = new THREE.Vector3();
+// Movement variables are now managed by PlayerPhysics
 
 const onKeyDown = (event: KeyboardEvent) => {
   if (isCliOpen) return; // Ignore game keys when typing
@@ -172,25 +171,22 @@ const onKeyDown = (event: KeyboardEvent) => {
       break;
     case "ArrowUp":
     case "KeyW":
-      moveForward = true;
+      playerPhysics.moveForward = true;
       break;
     case "ArrowLeft":
     case "KeyA":
-      moveLeft = true;
+      playerPhysics.moveLeft = true;
       break;
     case "ArrowDown":
     case "KeyS":
-      moveBackward = true;
+      playerPhysics.moveBackward = true;
       break;
     case "ArrowRight":
     case "KeyD":
-      moveRight = true;
+      playerPhysics.moveRight = true;
       break;
     case "Space":
-      if (isOnGround) {
-        velocity.y = JUMP_IMPULSE;
-        isOnGround = false;
-      }
+      playerPhysics.jump();
       break;
     case "KeyE":
       if (!gameState.getPaused()) toggleInventory(false);
@@ -206,19 +202,19 @@ const onKeyUp = (event: KeyboardEvent) => {
   switch (event.code) {
     case "ArrowUp":
     case "KeyW":
-      moveForward = false;
+      playerPhysics.moveForward = false;
       break;
     case "ArrowLeft":
     case "KeyA":
-      moveLeft = false;
+      playerPhysics.moveLeft = false;
       break;
     case "ArrowDown":
     case "KeyS":
-      moveBackward = false;
+      playerPhysics.moveBackward = false;
       break;
     case "ArrowRight":
     case "KeyD":
-      moveRight = false;
+      playerPhysics.moveRight = false;
       break;
   }
 };
@@ -228,6 +224,10 @@ document.addEventListener("keyup", onKeyUp);
 
 // World Generation
 const world = new World(scene);
+
+// Initialize PlayerPhysics
+const playerPhysics = new PlayerPhysics(controls, world);
+
 const entities: ItemEntity[] = [];
 const mobManager = new MobManager(world, scene, entities);
 
@@ -286,10 +286,10 @@ function toggleCLI(open: boolean, initialChar: string = "") {
     cliInput.focus();
     controls.unlock();
     // Clear move flags to stop walking when typing
-    moveForward = false;
-    moveBackward = false;
-    moveLeft = false;
-    moveRight = false;
+    playerPhysics.moveForward = false;
+    playerPhysics.moveBackward = false;
+    playerPhysics.moveLeft = false;
+    playerPhysics.moveRight = false;
   } else {
     isCliOpen = false;
     cliContainer.style.display = "none";
@@ -1388,152 +1388,25 @@ window.addEventListener("keydown", (event) => {
 });
 
 // Interaction
-const raycaster = new THREE.Raycaster();
-const cursorGeometry = new THREE.BoxGeometry(1.01, 1.01, 1.01);
-const cursorMaterial = new THREE.MeshBasicMaterial({
-  color: 0x000000,
-  wireframe: true,
-});
-const cursorMesh = new THREE.Mesh(cursorGeometry, cursorMaterial);
-cursorMesh.visible = false;
-scene.add(cursorMesh);
+const blockCursor = new BlockCursor(scene, camera, controls);
+const cursorMesh = blockCursor.getMesh();
 
 // --- Block Breaking System ---
 
 // 1. Generate Crack Textures (Atlas)
 // We'll create a 10-frame atlas on a canvas
-const crackCanvas = document.createElement("canvas");
-crackCanvas.width = 640; // 10 frames * 64px
-crackCanvas.height = 64;
-const crackCtx = crackCanvas.getContext("2d")!;
-
-// Disable smoothing for pixelated look
-crackCtx.imageSmoothingEnabled = false;
-
-for (let i = 0; i < 10; i++) {
-  const offsetX = i * 64;
-  const centerX = 32;
-  const centerY = 32;
-
-  // Percent based on frame (0.1 to 1.0)
-  const progress = (i + 1) / 10;
-  const maxDist = 32 * 1.2; // Cover corners
-  const currentDist = maxDist * progress;
-
-  // Pixelate: Loop 4x4 pixel blocks (16x16 grid for 64x64 texture)
-  const pixelSize = 4;
-
-  for (let x = 0; x < 64; x += pixelSize) {
-    for (let y = 0; y < 64; y += pixelSize) {
-      const dx = x + pixelSize / 2 - centerX;
-      const dy = y + pixelSize / 2 - centerY;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-
-      // Add some noise to the edge
-      const noise = (Math.random() - 0.5) * 10;
-
-      if (dist < currentDist + noise) {
-        crackCtx.fillStyle = "rgba(0, 0, 0, 0.7)"; // Semi-transparent black
-        crackCtx.fillRect(offsetX + x, y, pixelSize, pixelSize);
-      }
-    }
-  }
-}
-
-const crackTexture = new THREE.CanvasTexture(crackCanvas);
-crackTexture.magFilter = THREE.NearestFilter;
-crackTexture.minFilter = THREE.NearestFilter;
-// We need to show only 1/10th of the texture
-crackTexture.repeat.set(0.1, 1);
-
-const crackGeometry = new THREE.BoxGeometry(1.002, 1.002, 1.002);
-const crackMaterial = new THREE.MeshBasicMaterial({
-  map: crackTexture,
-  transparent: true,
-  depthTest: true,
-  depthWrite: false,
-  polygonOffset: true,
-  polygonOffsetFactor: -4, // Push towards camera significantly
-});
-const crackMesh = new THREE.Mesh(crackGeometry, crackMaterial);
-crackMesh.visible = false;
-crackMesh.renderOrder = 999; // Render last (on top of blocks)
-scene.add(crackMesh);
-
-// State
-let isBreaking = false;
-let isAttackPressed = false;
-let breakStartTime = 0;
-let currentBreakBlock = new THREE.Vector3();
-let currentBreakId = 0;
-
-function updateBreaking(time: number) {
-  if (!isBreaking) {
-    crackMesh.visible = false;
-    return;
-  }
-
-  // Raycast to check if still looking at same block
-  raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
-  const hit = raycaster
-    .intersectObjects(scene.children)
-    .find(
-      (i) =>
-        i.object !== cursorMesh &&
-        i.object !== crackMesh &&
-        i.object !== controls.object &&
-        (i.object as any).isMesh &&
-        !(i.object as any).isItem &&
-        !(i.object.parent as any)?.isMob,
-    );
-
-  let lookingAtSame = false;
-  if (hit && hit.distance < 6) {
-    const p = hit.point
-      .clone()
-      .add(raycaster.ray.direction.clone().multiplyScalar(0.1));
-    const x = Math.floor(p.x);
-    const y = Math.floor(p.y);
-    const z = Math.floor(p.z);
-
-    if (
-      x === currentBreakBlock.x &&
-      y === currentBreakBlock.y &&
-      z === currentBreakBlock.z
-    ) {
-      lookingAtSame = true;
-    }
-  }
-
-  if (!lookingAtSame) {
-    // Stop breaking if looked away
-    isBreaking = false;
-    crackMesh.visible = false;
-    return;
-  }
-
-  // Update Progress
-  const toolId = inventorySlots[selectedSlot].id;
-  const duration = world.getBreakTime(currentBreakId, toolId);
-  const elapsed = time - breakStartTime;
-  const progress = Math.min(elapsed / duration, 1.0);
-
-  if (progress >= 1.0) {
-    // Break it!
-    const x = currentBreakBlock.x;
-    const y = currentBreakBlock.y;
-    const z = currentBreakBlock.z;
-
+// Block Breaking System
+const blockBreaking = new BlockBreaking(
+  scene,
+  camera,
+  controls,
+  () => inventorySlots[selectedSlot].id,
+  (x, y, z, id) => {
     // Drop Item
-    if (currentBreakId !== 0) {
+    if (id !== 0) {
       let toolTexture = null;
-      // Only use flat texture for tools (>=20) or Stick (8)
-      // Crafting Table (9) has an icon in TOOL_TEXTURES but should be 3D
-      if (
-        TOOL_TEXTURES[currentBreakId] &&
-        (currentBreakId >= 20 || currentBreakId === 8)
-      ) {
-        toolTexture = TOOL_TEXTURES[currentBreakId].texture;
+      if (TOOL_TEXTURES[id] && (id >= 20 || id === 8)) {
+        toolTexture = TOOL_TEXTURES[id].texture;
       }
       entities.push(
         new ItemEntity(
@@ -1542,275 +1415,80 @@ function updateBreaking(time: number) {
           x,
           y,
           z,
-          currentBreakId,
+          id,
           world.noiseTexture,
           toolTexture,
         ),
       );
     }
-
     world.setBlock(x, y, z, 0); // AIR
+  },
+  cursorMesh,
+);
+const crackMesh = blockBreaking.getCrackMesh();
 
-    // Reset
-    isBreaking = false;
-    crackMesh.visible = false;
-  } else {
-    // Update Visuals
-    crackMesh.visible = true;
-    crackMesh.position.set(
-      currentBreakBlock.x + 0.5,
-      currentBreakBlock.y + 0.5,
-      currentBreakBlock.z + 0.5,
-    );
+// State
+let isAttackPressed = false;
 
-    // Select frame 0-9
-    const frame = Math.floor(progress * 9);
-    crackTexture.offset.x = frame * 0.1;
-  }
+function updateBreaking(time: number) {
+  blockBreaking.update(time, world);
 }
 
 function startBreaking() {
-  raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
-  const hit = raycaster
-    .intersectObjects(scene.children)
-    .find(
-      (i) =>
-        i.object !== cursorMesh &&
-        i.object !== crackMesh &&
-        i.object !== controls.object &&
-        (i.object as any).isMesh &&
-        !(i.object as any).isItem &&
-        !(i.object.parent as any)?.isMob,
-    );
-
-  if (hit && hit.distance < 6) {
-    const p = hit.point
-      .clone()
-      .add(raycaster.ray.direction.clone().multiplyScalar(0.01));
-    const x = Math.floor(p.x);
-    const y = Math.floor(p.y);
-    const z = Math.floor(p.z);
-
-    const id = world.getBlock(x, y, z);
-    if (id !== 0 && id !== 4) {
-      // Not Air or Bedrock
-      isBreaking = true;
-      breakStartTime = performance.now();
-      currentBreakBlock.set(x, y, z);
-      currentBreakId = id;
-    }
-  }
+  blockBreaking.start(world);
 }
 
 // Player Health System
-let playerHP = 20;
-let isInvulnerable = false;
 const damageOverlay = document.getElementById("damage-overlay")!;
 const healthBarElement = document.getElementById("health-bar")!;
 const healthBar = new HealthBar(healthBarElement);
 
-function updateHealthUI() {
-  healthBar.update(playerHP);
-}
+const playerHealth = new PlayerHealth(
+  damageOverlay,
+  healthBar,
+  camera,
+  controls,
+  (pos) => playerPhysics.checkCollision(pos),
+  () => {
+    // onRespawn
+    playerPhysics.setVelocity(new THREE.Vector3(0, 0, 0));
+  },
+);
+// Combat System
+const playerCombat = new PlayerCombat(
+  camera,
+  scene,
+  controls,
+  () => inventorySlots[selectedSlot].id,
+  cursorMesh,
+  crackMesh,
+);
 
-function takeDamage(amount: number) {
-  if (isInvulnerable) return;
+// Block Interaction
+const blockInteraction = new BlockInteraction(
+  camera,
+  scene,
+  controls,
+  () => inventorySlots[selectedSlot],
+  (x, y, z, id) => {
+    world.setBlock(x, y, z, id);
 
-  playerHP -= amount;
-  if (playerHP < 0) playerHP = 0;
-  updateHealthUI();
-
-  isInvulnerable = true;
-
-  // Red Flash Effect
-  damageOverlay.style.transition = "none";
-  damageOverlay.style.opacity = "0.3";
-
-  // Camera Shake
-  const originalPos = camera.position.clone();
-  const shakeIntensity = 0.2;
-
-  // Apply shake
-  camera.position.x += (Math.random() - 0.5) * shakeIntensity;
-  camera.position.y += (Math.random() - 0.5) * shakeIntensity;
-  camera.position.z += (Math.random() - 0.5) * shakeIntensity;
-
-  // Verify valid position
-  if (checkCollision(camera.position)) {
-    camera.position.copy(originalPos);
-  }
-
-  // Restore
-  requestAnimationFrame(() => {
-    damageOverlay.style.transition = "opacity 0.5s ease-out";
-    damageOverlay.style.opacity = "0";
-  });
-
-  if (playerHP <= 0) {
-    respawn();
-  }
-
-  setTimeout(() => {
-    isInvulnerable = false;
-  }, 500);
-}
-
-function respawn() {
-  playerHP = 20;
-  updateHealthUI();
-  isInvulnerable = false;
-
-  // Teleport to spawn
-  controls.object.position.set(8, 40, 8);
-  velocity.set(0, 0, 0);
-
-  console.log("Respawned!");
-}
-
-// Combat Constants (imported from constants/GameConstants.ts)
-let lastPlayerAttackTime = 0;
-
-function performAttack() {
-  const now = Date.now();
-  if (now - lastPlayerAttackTime < ATTACK_COOLDOWN) return;
-  lastPlayerAttackTime = now;
-
-  // Calculate Damage
-  let damage = 1;
-  const toolId = inventorySlots[selectedSlot].id;
-  if (toolId === 20)
-    damage = 4; // Wood Sword
-  else if (toolId === 21)
-    damage = 5; // Stone Sword
-  else if (toolId === 24)
-    damage = 3; // Wood Axe
-  else if (toolId === 25)
-    damage = 4; // Stone Axe
-  else if (toolId === 22)
-    damage = 2; // Wood Pick
-  else if (toolId === 23)
-    damage = 3; // Stone Pick
-  else if (toolId === 26)
-    damage = 1.5; // Wood Shovel
-  else if (toolId === 27) damage = 2.5; // Stone Shovel
-
-  raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
-  const intersects = raycaster.intersectObjects(scene.children, true); // Recursive to hit mob parts
-
-  for (const hit of intersects) {
-    if (hit.distance > ATTACK_RANGE) break;
-
-    // Check if it's a mob or part of a mob
-    let obj: THREE.Object3D | null = hit.object;
-    let isMob = false;
-    while (obj) {
-      if (obj.userData && obj.userData.mob) {
-        isMob = true;
-        break;
-      }
-      obj = obj.parent;
+    const slot = inventorySlots[selectedSlot];
+    slot.count--;
+    if (slot.count <= 0) {
+      slot.id = 0;
+      slot.count = 0;
     }
-
-    if (isMob && obj) {
-      obj.userData.mob.takeDamage(damage, controls.object.position);
-      return; // Hit first mob and stop
-    }
-
-    // If we hit something else (like a block) that isn't ignored
-    if (
-      hit.object !== cursorMesh &&
-      hit.object !== crackMesh &&
-      hit.object !== controls.object &&
-      (hit.object as any).isMesh &&
-      !(hit.object as any).isItem
-    ) {
-      // We hit a wall/block before any mob
-      return;
-    }
-  }
-}
+    refreshInventoryUI();
+    return true;
+  },
+  () => toggleInventory(true),
+  cursorMesh,
+  crackMesh,
+);
 
 function performInteract() {
-  raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
-  const intersects = raycaster.intersectObjects(scene.children);
-  const hit = intersects.find(
-    (i) =>
-      i.object !== cursorMesh &&
-      i.object !== crackMesh &&
-      i.object !== controls.object &&
-      (i.object as any).isMesh &&
-      !(i.object as any).isItem &&
-      !(i.object.parent as any)?.isMob,
-  );
-
-  if (hit && hit.distance < 6) {
-    const p = hit.point
-      .clone()
-      .add(raycaster.ray.direction.clone().multiplyScalar(0.01));
-    const x = Math.floor(p.x);
-    const y = Math.floor(p.y);
-    const z = Math.floor(p.z);
-
-    const targetId = world.getBlock(x, y, z);
-    if (targetId === BLOCK.CRAFTING_TABLE) {
-      toggleInventory(true); // Open 3x3
-      return;
-    }
-
-    // Place Block
-    const slot = inventorySlots[selectedSlot];
-    if (slot.id !== 0 && slot.count > 0) {
-      // Prevent placing non-blocks (e.g. Stick, Tools)
-      if (slot.id === BLOCK.STICK || slot.id >= 20) return;
-
-      if (hit.face) {
-        const p = hit.point
-          .clone()
-          .add(hit.face.normal.clone().multiplyScalar(0.01));
-        const x = Math.floor(p.x);
-        const y = Math.floor(p.y);
-        const z = Math.floor(p.z);
-
-        // Check collision with player
-        const playerMinX = controls.object.position.x - playerHalfWidth;
-        const playerMaxX = controls.object.position.x + playerHalfWidth;
-        const playerMinY = controls.object.position.y - eyeHeight;
-        const playerMaxY =
-          controls.object.position.y - eyeHeight + playerHeight;
-        const playerMinZ = controls.object.position.z - playerHalfWidth;
-        const playerMaxZ = controls.object.position.z + playerHalfWidth;
-
-        const blockMinX = x;
-        const blockMaxX = x + 1;
-        const blockMinY = y;
-        const blockMaxY = y + 1;
-        const blockMinZ = z;
-        const blockMaxZ = z + 1;
-
-        if (
-          playerMinX < blockMaxX &&
-          playerMaxX > blockMinX &&
-          playerMinY < blockMaxY &&
-          playerMaxY > blockMinY &&
-          playerMinZ < blockMaxZ &&
-          playerMaxZ > blockMinZ
-        ) {
-          // Cannot place block inside player
-          return;
-        }
-
-        world.setBlock(x, y, z, slot.id);
-
-        // Decrement Inventory
-        slot.count--;
-        if (slot.count <= 0) {
-          slot.id = 0;
-          slot.count = 0;
-        }
-        refreshInventoryUI();
-      }
-    }
-  }
+  blockInteraction.interact(world);
 }
 
 document.addEventListener("mousedown", (event) => {
@@ -1821,7 +1499,7 @@ document.addEventListener("mousedown", (event) => {
   if (event.button === 0) {
     isAttackPressed = true;
     playerHand.punch();
-    performAttack(); // Hit mobs
+    playerCombat.performAttack(); // Hit mobs
     startBreaking(); // Start mining block
   } else if (event.button === 2) performInteract();
 });
@@ -1829,60 +1507,10 @@ document.addEventListener("mousedown", (event) => {
 document.addEventListener("mouseup", () => {
   if (isAttackPressed) isAttackPressed = false;
   playerHand.stopPunch();
-  isBreaking = false;
-  crackMesh.visible = false;
+  blockBreaking.stop();
 });
 
-// Player dimensions (imported from constants/GameConstants.ts)
-const playerHalfWidth = PLAYER_HALF_WIDTH;
-const playerHeight = PLAYER_HEIGHT;
-const eyeHeight = PLAYER_EYE_HEIGHT;
-
-function checkCollision(position: THREE.Vector3): boolean {
-  const minX = Math.floor(position.x - playerHalfWidth);
-  const maxX = Math.floor(position.x + playerHalfWidth);
-  const minY = Math.floor(position.y - eyeHeight);
-  const maxY = Math.floor(position.y - eyeHeight + playerHeight);
-  const minZ = Math.floor(position.z - playerHalfWidth);
-  const maxZ = Math.floor(position.z + playerHalfWidth);
-
-  for (let x = minX; x <= maxX; x++) {
-    for (let y = minY; y <= maxY; y++) {
-      for (let z = minZ; z <= maxZ; z++) {
-        if (world.hasBlock(x, y, z)) {
-          // Precise AABB check
-          // Block AABB (blocks are centered at integer coordinates)
-          const blockMinX = x;
-          const blockMaxX = x + 1;
-          const blockMinY = y;
-          const blockMaxY = y + 1;
-          const blockMinZ = z;
-          const blockMaxZ = z + 1;
-
-          // Player AABB
-          const playerMinX = position.x - playerHalfWidth;
-          const playerMaxX = position.x + playerHalfWidth;
-          const playerMinY = position.y - eyeHeight;
-          const playerMaxY = position.y - eyeHeight + playerHeight;
-          const playerMinZ = position.z - playerHalfWidth;
-          const playerMaxZ = position.z + playerHalfWidth;
-
-          if (
-            playerMinX < blockMaxX &&
-            playerMaxX > blockMinX &&
-            playerMinY < blockMaxY &&
-            playerMaxY > blockMinY &&
-            playerMinZ < blockMaxZ &&
-            playerMaxZ > blockMinZ
-          ) {
-            return true;
-          }
-        }
-      }
-    }
-  }
-  return false;
-}
+// Player dimensions are handled in PlayerPhysics
 
 // Animation Loop
 let prevTime = performance.now();
@@ -1904,16 +1532,19 @@ function animate() {
 
   // Player Hand Update
   const isMoving =
-    (moveForward || moveBackward || moveLeft || moveRight) && isOnGround;
+    (playerPhysics.moveForward ||
+      playerPhysics.moveBackward ||
+      playerPhysics.moveLeft ||
+      playerPhysics.moveRight) &&
+    playerPhysics.isOnGround;
   playerHand.update(delta, isMoving);
 
   updateBreaking(time);
 
   if (isAttackPressed && !gameState.getPaused() && gameState.getGameStarted()) {
-    if (!isBreaking) startBreaking();
-    performAttack();
+    if (!blockBreaking.isBreakingNow()) startBreaking();
+    playerCombat.performAttack();
   }
-
   // Update Entities & Pickup
   for (let i = entities.length - 1; i >= 0; i--) {
     const entity = entities[i];
@@ -1957,40 +1588,13 @@ function animate() {
   }
 
   // Update Mob Manager
-  mobManager.update(delta, controls.object.position, environment, takeDamage);
+  mobManager.update(delta, controls.object.position, environment, (amt) =>
+    playerHealth.takeDamage(amt),
+  );
 
   // Cursor Update
   if (!gameState.getPaused() && gameState.getGameStarted()) {
-    raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
-    const intersects = raycaster.intersectObjects(scene.children);
-    const hit = intersects.find(
-      (i) =>
-        i.object !== cursorMesh &&
-        i.object !== controls.object &&
-        (i.object as any).isMesh &&
-        !(i.object as any).isItem &&
-        !(i.object.parent as any)?.isMob,
-    );
-
-    if (hit && hit.distance < 6) {
-      const p = hit.point
-        .clone()
-        .add(raycaster.ray.direction.clone().multiplyScalar(0.01));
-      const x = Math.floor(p.x);
-      const y = Math.floor(p.y);
-      const z = Math.floor(p.z);
-
-      const id = world.getBlock(x, y, z);
-
-      if (id !== 0) {
-        cursorMesh.visible = true;
-        cursorMesh.position.set(x + 0.5, y + 0.5, z + 0.5);
-      } else {
-        cursorMesh.visible = false;
-      }
-    } else {
-      cursorMesh.visible = false;
-    }
+    blockCursor.update(world);
   }
 
   if (!gameState.getPaused() && gameState.getGameStarted()) {
@@ -2009,80 +1613,7 @@ function animate() {
       return;
     }
 
-    // Input Vector (Local)
-    const inputX = Number(moveRight) - Number(moveLeft);
-    const inputZ = Number(moveForward) - Number(moveBackward);
-
-    // Get Camera Direction (World projected to flat plane)
-    const forward = new THREE.Vector3();
-    controls.getDirection(forward);
-    forward.y = 0;
-    forward.normalize();
-
-    const right = new THREE.Vector3();
-    right.crossVectors(forward, new THREE.Vector3(0, 1, 0));
-
-    // Wish Direction (World)
-    const moveDir = new THREE.Vector3()
-      .addScaledVector(forward, inputZ)
-      .addScaledVector(right, inputX);
-
-    if (moveDir.lengthSq() > 0) moveDir.normalize();
-
-    // Acceleration & Friction
-    const speed = 50.0; // Acceleration force
-    const friction = 10.0; // Friction factor
-    const safeDelta = Math.min(delta, 0.05);
-
-    if (moveForward || moveBackward || moveLeft || moveRight) {
-      velocity.x += moveDir.x * speed * safeDelta;
-      velocity.z += moveDir.z * speed * safeDelta;
-    }
-
-    const damping = Math.exp(-friction * safeDelta);
-    velocity.x *= damping;
-    velocity.z *= damping;
-    velocity.y -= GRAVITY * safeDelta;
-
-    // Apply & Collide X
-    controls.object.position.x += velocity.x * safeDelta;
-    if (checkCollision(controls.object.position)) {
-      controls.object.position.x -= velocity.x * safeDelta;
-      velocity.x = 0;
-    }
-
-    // Apply & Collide Z
-    controls.object.position.z += velocity.z * safeDelta;
-    if (checkCollision(controls.object.position)) {
-      controls.object.position.z -= velocity.z * safeDelta;
-      velocity.z = 0;
-    }
-
-    // Apply & Collide Y
-    controls.object.position.y += velocity.y * safeDelta;
-
-    // Assume we are in air until we hit ground
-    isOnGround = false;
-
-    if (checkCollision(controls.object.position)) {
-      // Collision detected on Y axis
-      if (velocity.y < 0) {
-        // Falling, hit ground
-        isOnGround = true;
-        controls.object.position.y -= velocity.y * safeDelta;
-        velocity.y = 0;
-      } else {
-        // Jumping, hit ceiling
-        controls.object.position.y -= velocity.y * safeDelta;
-        velocity.y = 0;
-      }
-    }
-
-    // Fallback for falling out of world
-    if (controls.object.position.y < -50) {
-      controls.object.position.set(8, 40, 20);
-      velocity.set(0, 0, 0);
-    }
+    playerPhysics.update(delta);
   }
 
   prevTime = time;
@@ -2176,10 +1707,10 @@ if (isMobile) {
     // Fix inversion: dy is negative when moving UP (forward)
     // moveForward should be true if dy is negative
     const threshold = 10;
-    moveForward = dy < -threshold;
-    moveBackward = dy > threshold;
-    moveLeft = dx < -threshold;
-    moveRight = dx > threshold;
+    playerPhysics.moveForward = dy < -threshold;
+    playerPhysics.moveBackward = dy > threshold;
+    playerPhysics.moveLeft = dx < -threshold;
+    playerPhysics.moveRight = dx > threshold;
   });
 
   const resetStick = (e: TouchEvent) => {
@@ -2204,13 +1735,13 @@ if (isMobile) {
 
       joystickStick.style.transform = `translate(-50%, -50%)`;
 
-      moveForward = false;
+      playerPhysics.moveForward = false;
 
-      moveBackward = false;
+      playerPhysics.moveBackward = false;
 
-      moveLeft = false;
+      playerPhysics.moveLeft = false;
 
-      moveRight = false;
+      playerPhysics.moveRight = false;
     }
   };
 
@@ -2222,12 +1753,7 @@ if (isMobile) {
 
   document.getElementById("btn-jump")!.addEventListener("touchstart", (e) => {
     e.preventDefault();
-
-    if (isOnGround) {
-      velocity.y = JUMP_IMPULSE;
-
-      isOnGround = false;
-    }
+    playerPhysics.jump();
   });
 
   const btnAttack = document.getElementById("btn-attack")!;
@@ -2246,7 +1772,7 @@ if (isMobile) {
 
     isAttackPressed = true;
     playerHand.punch();
-    performAttack();
+    playerCombat.performAttack();
     startBreaking();
   });
 
@@ -2293,8 +1819,7 @@ if (isMobile) {
     if (touchFound) {
       isAttackPressed = false;
       playerHand.stopPunch();
-      isBreaking = false;
-      crackMesh.visible = false;
+      blockBreaking.stop();
       attackTouchId = null;
     }
   };
@@ -2522,10 +2047,9 @@ async function startGame(loadSave: boolean) {
     if (!loadSave) {
       await world.deleteWorld();
       // Reset player state
-      playerHP = 20;
-      updateHealthUI();
-      controls.object.position.set(8, 40, 20);
-      velocity.set(0, 0, 0);
+      playerHealth.respawn();
+      controls.object.position.set(8, 40, 20); // Override respawn pos if needed
+
       // Clear inventory
       for (let i = 0; i < 36; i++) {
         inventorySlots[i] = { id: 0, count: 0 };
@@ -2535,7 +2059,7 @@ async function startGame(loadSave: boolean) {
       const data = await world.loadWorld();
       if (data.playerPosition) {
         controls.object.position.copy(data.playerPosition);
-        velocity.set(0, 0, 0);
+        playerPhysics.setVelocity(new THREE.Vector3(0, 0, 0));
       }
       if (data.inventory) {
         for (let i = 0; i < 36; i++) {
