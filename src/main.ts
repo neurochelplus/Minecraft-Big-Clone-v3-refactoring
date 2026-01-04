@@ -2,17 +2,15 @@ import * as THREE from "three";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
 import { World, BLOCK } from "./World";
 import { ItemEntity } from "./ItemEntity";
-import {
-  TOOL_DEFS,
-  generateToolTexture,
-  generateBlockIcon,
-} from "./ToolTextures";
+import { TOOL_DEFS, initToolTextures, TOOL_TEXTURES } from "./ToolTextures";
 import { BLOCK_DEFS } from "./BlockTextures";
-import type { GeneratedTexture } from "./ToolTextures";
 import { RECIPES } from "./Recipes";
 import type { Recipe } from "./Recipes";
 import { MobManager } from "./MobManager";
 import { PlayerHand } from "./PlayerHand";
+import { Inventory } from "./inventory/Inventory";
+import { DragDrop } from "./inventory/DragDrop";
+import { InventoryUI } from "./inventory/InventoryUI";
 import {
   GRAVITY,
   JUMP_HEIGHT,
@@ -38,78 +36,7 @@ import { BlockBreaking } from "./blocks/BlockBreaking";
 import { BlockInteraction } from "./blocks/BlockInteraction";
 import "./style.css";
 
-// Tool Textures Registry
-const TOOL_TEXTURES: Record<number, GeneratedTexture> = {};
-
-function initToolTextures() {
-  try {
-    if (!BLOCK) {
-      console.error("BLOCK is undefined! World module failed to load?");
-      return;
-    }
-
-    console.log("Generating tool textures...");
-
-    TOOL_TEXTURES[BLOCK.STICK] = generateToolTexture(
-      TOOL_DEFS.STICK.pattern,
-      TOOL_DEFS.STICK.color,
-    );
-
-    TOOL_TEXTURES[BLOCK.WOODEN_SWORD] = generateToolTexture(
-      TOOL_DEFS.WOODEN_SWORD.pattern,
-      TOOL_DEFS.WOODEN_SWORD.color,
-    );
-    TOOL_TEXTURES[BLOCK.STONE_SWORD] = generateToolTexture(
-      TOOL_DEFS.STONE_SWORD.pattern,
-      TOOL_DEFS.STONE_SWORD.color,
-    );
-
-    TOOL_TEXTURES[BLOCK.WOODEN_PICKAXE] = generateToolTexture(
-      TOOL_DEFS.WOODEN_PICKAXE.pattern,
-      TOOL_DEFS.WOODEN_PICKAXE.color,
-    );
-    TOOL_TEXTURES[BLOCK.STONE_PICKAXE] = generateToolTexture(
-      TOOL_DEFS.STONE_PICKAXE.pattern,
-      TOOL_DEFS.STONE_PICKAXE.color,
-    );
-
-    TOOL_TEXTURES[BLOCK.WOODEN_AXE] = generateToolTexture(
-      TOOL_DEFS.WOODEN_AXE.pattern,
-      TOOL_DEFS.WOODEN_AXE.color,
-    );
-    TOOL_TEXTURES[BLOCK.STONE_AXE] = generateToolTexture(
-      TOOL_DEFS.STONE_AXE.pattern,
-      TOOL_DEFS.STONE_AXE.color,
-    );
-
-    TOOL_TEXTURES[BLOCK.WOODEN_SHOVEL] = generateToolTexture(
-      TOOL_DEFS.WOODEN_SHOVEL.pattern,
-      TOOL_DEFS.WOODEN_SHOVEL.color,
-    );
-    TOOL_TEXTURES[BLOCK.STONE_SHOVEL] = generateToolTexture(
-      TOOL_DEFS.STONE_SHOVEL.pattern,
-      TOOL_DEFS.STONE_SHOVEL.color,
-    );
-
-    // Generate Crafting Table Icon
-    if (
-      BLOCK_DEFS.CRAFTING_TABLE_TOP &&
-      BLOCK_DEFS.CRAFTING_TABLE_TOP.pattern &&
-      BLOCK_DEFS.CRAFTING_TABLE_TOP.colors
-    ) {
-      TOOL_TEXTURES[BLOCK.CRAFTING_TABLE] = generateBlockIcon(
-        BLOCK_DEFS.CRAFTING_TABLE_TOP.pattern,
-        BLOCK_DEFS.CRAFTING_TABLE_TOP.colors,
-      );
-    }
-
-    console.log("Tool textures generated.");
-  } catch (e) {
-    console.error("Failed to generate tool textures:", e);
-  }
-}
-
-// Initialize later to ensure dependencies are ready
+// Initialize Tool Textures
 initToolTextures();
 
 // Initialize Renderer (handles scene, camera, renderer, controls)
@@ -242,21 +169,29 @@ const playerHand = new PlayerHand(uiCamera, world.noiseTexture, TOOL_TEXTURES);
 
 // Block Data (imported from constants/BlockNames.ts)
 
-// Inventory State
-const inventorySlots = Array.from({ length: 36 }, () => ({ id: 0, count: 0 }));
-let selectedSlot = 0;
+// Inventory System
+const inventory = new Inventory();
+const dragDrop = new DragDrop();
+const inventoryUI = new InventoryUI(inventory, dragDrop, isMobile);
+
+// Connect Inventory to PlayerHand and HotbarLabel
+inventoryUI.onInventoryChange = () => {
+  const slot = inventory.getSelectedSlotItem();
+  playerHand.updateItem(slot.id);
+  if (slot.id !== 0) {
+    hotbarLabel.show(BLOCK_NAMES[slot.id] || "Block");
+  } else {
+    hotbarLabel.hide();
+  }
+
+  if (isInventoryOpen) updateCraftingVisuals();
+};
+
 let isInventoryOpen = false;
-let touchStartSlotIndex: number | null = null;
 
-// Drag and Drop State
-let draggedItem: { id: number; count: number } | null = null;
-const dragIcon = document.getElementById("drag-icon")!;
-
-// UI Elements
-const hotbarContainer = document.getElementById("hotbar")!;
+// UI Elements (for Menu toggling)
 const inventoryMenu = document.getElementById("inventory-menu")!;
-const inventoryGrid = document.getElementById("inventory-grid")!;
-const tooltip = document.getElementById("tooltip")!;
+
 // UI Components
 const hotbarLabelElement = document.getElementById("hotbar-label")!;
 const hotbarLabel = new HotbarLabel(hotbarLabelElement);
@@ -342,24 +277,8 @@ function handleCommand(cmd: string) {
 }
 
 function addItemToInventory(id: number, count: number) {
-  // 1. Try to stack
-  for (let i = 0; i < 36; i++) {
-    if (inventorySlots[i].id === id) {
-      inventorySlots[i].count += count;
-      refreshInventoryUI();
-      return;
-    }
-  }
-  // 2. Empty slot
-  for (let i = 0; i < 36; i++) {
-    if (inventorySlots[i].id === 0) {
-      inventorySlots[i].id = id;
-      inventorySlots[i].count = count;
-      refreshInventoryUI();
-      return;
-    }
-  }
-  hotbarLabel.show("Inventory full!");
+  inventory.addItem(id, count);
+  inventoryUI.refresh();
 }
 
 cliInput.addEventListener("keydown", (e) => {
@@ -390,127 +309,6 @@ document.body.style.setProperty("--noise-url", `url(${canvas.toDataURL()})`);
 // getBlockColor imported from utils/BlockColors.ts
 
 // showHotbarLabel replaced by hotbarLabel.show() method
-
-function initSlotElement(index: number, isHotbar: boolean) {
-  const div = document.createElement("div");
-  div.classList.add("slot");
-  div.setAttribute("data-index", index.toString());
-
-  const icon = document.createElement("div");
-  icon.classList.add("block-icon");
-  icon.style.display = "none";
-  div.appendChild(icon);
-
-  const count = document.createElement("div");
-  count.classList.add("slot-count");
-  count.innerText = "";
-  div.appendChild(count);
-
-  div.addEventListener("mouseenter", () => {
-    const slot = inventorySlots[index];
-    if (isInventoryOpen && slot.id !== 0) {
-      tooltip.innerText = BLOCK_NAMES[slot.id] || "Блок";
-      tooltip.style.display = "block";
-    }
-  });
-
-  div.addEventListener("mousemove", (e) => {
-    if (isInventoryOpen) {
-      tooltip.style.left = e.clientX + 10 + "px";
-      tooltip.style.top = e.clientY + 10 + "px";
-    }
-  });
-
-  div.addEventListener("mouseleave", () => {
-    tooltip.style.display = "none";
-  });
-
-  div.addEventListener("mousedown", (e) => {
-    e.stopPropagation();
-    if (isInventoryOpen) {
-      handleSlotClick(index, e.button);
-    }
-  });
-
-  div.addEventListener("touchstart", (e) => {
-    e.stopPropagation();
-    if (e.cancelable) e.preventDefault();
-
-    if (isInventoryOpen) {
-      touchStartSlotIndex = index;
-      handleSlotClick(index);
-
-      const touch = e.changedTouches[0];
-      if (draggedItem) {
-        dragIcon.style.left = touch.clientX + "px";
-        dragIcon.style.top = touch.clientY + "px";
-      }
-    } else if (isHotbar) {
-      selectedSlot = index;
-      onHotbarChange();
-    }
-  });
-
-  return div;
-}
-
-function updateSlotVisuals(index: number) {
-  const slot = inventorySlots[index];
-  const elements = document.querySelectorAll(`.slot[data-index="${index}"]`);
-
-  elements.forEach((el) => {
-    if (el.parentElement === hotbarContainer) {
-      if (index === selectedSlot) el.classList.add("active");
-      else el.classList.remove("active");
-    }
-
-    const icon = el.querySelector(".block-icon") as HTMLElement;
-    const countEl = el.querySelector(".slot-count") as HTMLElement;
-
-    if (slot.id !== 0 && slot.count > 0) {
-      icon.style.display = "block";
-      icon.style.backgroundColor = getBlockColor(slot.id);
-
-      // Remove special classes first
-      icon.classList.remove(
-        "item-stick",
-        "item-planks",
-        "item-tool",
-        "tool-sword",
-        "tool-pickaxe",
-        "tool-axe",
-        "mat-wood",
-        "mat-stone",
-      );
-
-      // Reset styles
-      icon.style.backgroundImage = "";
-      icon.style.backgroundColor = "";
-
-      if (TOOL_TEXTURES[slot.id]) {
-        icon.classList.add("item-tool"); // Keeps size/reset
-        icon.style.backgroundImage = `url(${TOOL_TEXTURES[slot.id].dataUrl})`;
-      } else if (slot.id === 7) {
-        // Planks
-        icon.classList.add("item-planks");
-        icon.style.backgroundColor = getBlockColor(slot.id);
-      } else if (slot.id === 9) {
-        // Crafting Table
-        icon.style.backgroundColor = getBlockColor(slot.id);
-        // Could add special class for pattern
-        icon.style.backgroundImage = "var(--noise-url)";
-      } else {
-        icon.style.backgroundColor = getBlockColor(slot.id);
-        icon.style.backgroundImage = "var(--noise-url)"; // Restore noise for blocks
-      }
-
-      countEl.innerText = slot.count.toString();
-    } else {
-      icon.style.display = "none";
-      countEl.innerText = "";
-    }
-  });
-}
 
 // --- Crafting System ---
 let isCraftingOpen = false;
@@ -838,6 +636,7 @@ function checkRecipes() {
 
 function handleCraftSlotClick(index: number, button: number = 0) {
   const slot = craftingSlots[index];
+  let draggedItem = dragDrop.getDraggedItem();
 
   if (!draggedItem) {
     if (slot.id !== 0) {
@@ -891,24 +690,25 @@ function handleCraftSlotClick(index: number, button: number = 0) {
       checkRecipes();
     }
   }
+  dragDrop.setDraggedItem(draggedItem);
   updateCraftingVisuals();
-  updateDragIcon();
 }
 
 function handleResultClick() {
   if (craftingResult.id === 0) return;
 
+  let draggedItem = dragDrop.getDraggedItem();
+
   // Check if we can pick it up
   if (!draggedItem) {
     draggedItem = { ...craftingResult };
     consumeIngredients();
+    dragDrop.setDraggedItem(draggedItem);
   } else if (draggedItem.id === craftingResult.id) {
     draggedItem.count += craftingResult.count;
     consumeIngredients();
+    dragDrop.setDraggedItem(draggedItem);
   }
-
-  updateDragIcon();
-  // checkRecipes is called inside consumeIngredients
 }
 
 function consumeIngredients() {
@@ -928,38 +728,27 @@ function consumeIngredients() {
 // Mobile Crafting Logic
 function updateMobileCraftingList() {
   mobileCraftingList.innerHTML = "";
-
-  // Find all recipes that can be crafted from INVENTORY
-  // Just a simple "can craft" check?
-  // User wants a LIST of available items.
-  // Showing all recipes is safer, highlighting avail ones.
-
-  // For simplicity, let's just show all RECIPES.
+  const currentSlots = inventory.getSlots();
 
   RECIPES.forEach((recipe, idx) => {
     // Filter logic for Mobile:
-    // If NOT using crafting table (isCraftingTable == false), only allow 2x2 recipes.
     if (!isCraftingTable) {
       let needs3x3 = false;
-
       if (recipe.pattern) {
         if (recipe.pattern.length > 2 || recipe.pattern[0].length > 2) {
           needs3x3 = true;
         }
       } else if (recipe.ingredients) {
-        // Shapeless: > 4 items requires 3x3
         let totalIngredients = 0;
         recipe.ingredients.forEach((i) => (totalIngredients += i.count));
         if (totalIngredients > 4) needs3x3 = true;
       }
-
-      if (needs3x3) return; // Skip this recipe
+      if (needs3x3) return;
     }
 
-    // Calculate max craftable
     // 1. Tally Inventory
     const invMap = new Map<number, number>();
-    inventorySlots.forEach((s) => {
+    currentSlots.forEach((s) => {
       if (s.id !== 0) invMap.set(s.id, (invMap.get(s.id) || 0) + s.count);
     });
 
@@ -995,7 +784,7 @@ function updateMobileCraftingList() {
       }
     }
 
-    if (!canCraft) return; // Hide uncraftable? Or show disabled. "List of available for craft" implies filter.
+    if (!canCraft) return;
 
     const btn = document.createElement("div");
     btn.className = "craft-btn";
@@ -1011,7 +800,7 @@ function updateMobileCraftingList() {
 
       const ingIcon = document.createElement("div");
       ingIcon.className = "block-icon";
-      // Copy style logic... reusing helper would be better but inline for now
+
       if (TOOL_TEXTURES[reqId]) {
         ingIcon.classList.add("item-tool");
         ingIcon.style.backgroundImage = `url(${TOOL_TEXTURES[reqId].dataUrl})`;
@@ -1066,82 +855,21 @@ function updateMobileCraftingList() {
     btn.onclick = () => {
       // Consume from inventory
       for (const [reqId, reqCount] of reqMap) {
-        let remaining = reqCount;
-        for (let i = 0; i < 36; i++) {
-          if (inventorySlots[i].id === reqId) {
-            const take = Math.min(remaining, inventorySlots[i].count);
-            inventorySlots[i].count -= take;
-            remaining -= take;
-            if (inventorySlots[i].count === 0) inventorySlots[i].id = 0;
-            if (remaining <= 0) break;
-          }
-        }
+        inventory.removeItem(reqId, reqCount);
       }
 
       // Add result
-      addItemToInventory(recipe.result.id, recipe.result.count);
-      refreshInventoryUI(); // Updates list too
+      inventory.addItem(recipe.result.id, recipe.result.count);
+      inventoryUI.refresh(); // Updates list too
     };
 
     mobileCraftingList.appendChild(btn);
   });
 }
 
-function initInventoryUI() {
-  hotbarContainer.innerHTML = "";
-  inventoryGrid.innerHTML = "";
-
-  // Add Close Button for Mobile
-  if (!document.getElementById("btn-close-inv")) {
-    const closeBtn = document.createElement("div");
-    closeBtn.id = "btn-close-inv";
-    closeBtn.innerText = "X";
-    closeBtn.addEventListener("touchstart", (e) => {
-      e.preventDefault();
-      toggleInventory();
-    });
-    closeBtn.addEventListener("click", (e) => {
-      // Fallback
-      toggleInventory();
-    });
-    inventoryMenu.appendChild(closeBtn);
-  }
-
-  // Hotbar Container (0-8)
-  for (let i = 0; i < 9; i++) {
-    hotbarContainer.appendChild(initSlotElement(i, true));
-  }
-
-  // Inventory Grid: Main (9-35)
-  for (let i = 9; i < 36; i++) {
-    inventoryGrid.appendChild(initSlotElement(i, false));
-  }
-
-  // Separator
-  const separator = document.createElement("div");
-  separator.className = "slot-hotbar-separator";
-  separator.style.gridColumn = "1 / -1";
-  inventoryGrid.appendChild(separator);
-
-  // Inventory Grid: Hotbar Copy (0-8)
-  for (let i = 0; i < 9; i++) {
-    inventoryGrid.appendChild(initSlotElement(i, false));
-  }
-}
-
-function refreshInventoryUI() {
-  for (let i = 0; i < 36; i++) {
-    updateSlotVisuals(i);
-  }
-  // Update hand if active slot changed count or ID
-  const slot = inventorySlots[selectedSlot];
-  playerHand.updateItem(slot ? slot.id : 0);
-
-  if (isInventoryOpen) updateCraftingVisuals();
-}
-
 function toggleInventory(useCraftingTable = false) {
   isInventoryOpen = !isInventoryOpen;
+  dragDrop.setInventoryOpen(isInventoryOpen);
 
   if (isInventoryOpen) {
     controls.unlock();
@@ -1155,48 +883,45 @@ function toggleInventory(useCraftingTable = false) {
     // Mobile: Hide controls
     if (isMobile) {
       document.getElementById("mobile-ui")!.style.display = "none";
-      // But keep INV button visible? No, usually close with 'E' logic or back button.
-      // We need a close button on inventory menu for mobile.
-      // Actually 'btn-inv' is part of mobile-ui. If we hide mobile-ui, we hide the button to close it.
-      // Let's hide specific parts of mobile-ui.
       document.getElementById("joystick-zone")!.style.display = "none";
       document.getElementById("mobile-actions")!.style.display = "none";
-      // We need a way to close inventory.
-      // Add a close button to inventory menu?
-      // Or keep btn-inv visible.
-      // btn-inv is child of mobile-ui.
-      // Let's just hide joystick and actions.
     }
 
     updateCraftingGridSize();
-
-    // Clear crafting slots when opening/closing?
-    // MC keeps items in crafting table but throws them out if you close 2x2.
-    // Simplification: Return items to inventory on close.
-
-    refreshInventoryUI();
+    inventoryUI.refresh();
     updateCraftingVisuals();
+
+    // Init Close Button logic if needed (once)
+    if (!document.getElementById("btn-close-inv")) {
+      const closeBtn = document.createElement("div");
+      closeBtn.id = "btn-close-inv";
+      closeBtn.innerText = "X";
+      closeBtn.addEventListener("touchstart", (e) => {
+        e.preventDefault();
+        toggleInventory();
+      });
+      closeBtn.addEventListener("click", (e) => {
+        toggleInventory();
+      });
+      inventoryMenu.appendChild(closeBtn);
+    }
   } else {
     // Auto-save on close
     world.saveWorld({
       position: controls.object.position,
-      inventory: inventorySlots,
+      inventory: inventory.serialize(),
     });
 
     // Return crafting items to inventory
-    const size = isCraftingTable ? 3 : 2; // Actually we might have switched modes, but assuming we close what we opened.
-    // If we closed via 'E', it's possible we were in 3x3.
-    // Just clear all 9 slots to be safe.
     for (let i = 0; i < 9; i++) {
       if (craftingSlots[i].id !== 0) {
-        addItemToInventory(craftingSlots[i].id, craftingSlots[i].count);
+        inventory.addItem(craftingSlots[i].id, craftingSlots[i].count);
         craftingSlots[i].id = 0;
         craftingSlots[i].count = 0;
       }
     }
     craftingResult.id = 0;
     craftingResult.count = 0;
-    // We already updated visuals in toggle, but UI is hidden now.
 
     if (isMobile) {
       mobileCraftingList.style.display = "none";
@@ -1210,180 +935,33 @@ function toggleInventory(useCraftingTable = false) {
     inventoryMenu.style.display = "none";
     tooltip.style.display = "none";
 
-    if (draggedItem) {
-      for (let i = 0; i < 36; i++) {
-        if (inventorySlots[i].id === 0) {
-          inventorySlots[i] = draggedItem;
-          break;
-        } else if (inventorySlots[i].id === draggedItem.id) {
-          inventorySlots[i].count += draggedItem.count;
-          break;
-        }
-      }
-      draggedItem = null;
-      updateDragIcon();
+    const dragged = dragDrop.getDraggedItem();
+    if (dragged) {
+      inventory.addItem(dragged.id, dragged.count);
+      dragDrop.setDraggedItem(null);
     }
   }
 }
 
-function handleSlotClick(index: number, button: number = 0) {
-  const slot = inventorySlots[index];
-
-  if (!draggedItem) {
-    if (slot.id !== 0) {
-      if (button === 2) {
-        // Right Click: Split
-        const half = Math.ceil(slot.count / 2);
-        draggedItem = { id: slot.id, count: half };
-        slot.count -= half;
-        if (slot.count === 0) slot.id = 0;
-      } else {
-        // Left Click: Pickup All
-        draggedItem = { ...slot };
-        slot.id = 0;
-        slot.count = 0;
-      }
-    }
-  } else {
-    if (slot.id === 0) {
-      if (button === 2) {
-        // Right Click: Place One
-        slot.id = draggedItem.id;
-        slot.count = 1;
-        draggedItem.count--;
-        if (draggedItem.count === 0) draggedItem = null;
-      } else {
-        // Left Click: Place All
-        slot.id = draggedItem.id;
-        slot.count = draggedItem.count;
-        draggedItem = null;
-      }
-    } else if (slot.id === draggedItem.id) {
-      if (button === 2) {
-        // Right Click: Add One
-        slot.count++;
-        draggedItem.count--;
-        if (draggedItem.count === 0) draggedItem = null;
-      } else {
-        // Left Click: Add All
-        slot.count += draggedItem.count;
-        draggedItem = null;
-      }
-    } else {
-      // Swap (Left Click usually, RMB might fail or swap too)
-      const temp = { ...slot };
-      slot.id = draggedItem.id;
-      slot.count = draggedItem.count;
-      draggedItem = temp;
-    }
-  }
-
-  refreshInventoryUI();
-  updateDragIcon();
-}
-
-function updateDragIcon() {
-  dragIcon.innerHTML = "";
-  if (draggedItem && draggedItem.id !== 0) {
-    dragIcon.style.display = "block";
-    const icon = document.createElement("div");
-    icon.className = "block-icon";
-    icon.style.width = "32px";
-    icon.style.height = "32px";
-
-    if (TOOL_TEXTURES[draggedItem.id]) {
-      icon.classList.add("item-tool");
-      icon.style.backgroundImage = `url(${TOOL_TEXTURES[draggedItem.id].dataUrl})`;
-    } else if (draggedItem.id === 7) {
-      icon.classList.add("item-planks");
-      icon.style.backgroundColor = getBlockColor(draggedItem.id);
-    } else if (draggedItem.id === 9) {
-      icon.style.backgroundColor = getBlockColor(draggedItem.id);
-    } else {
-      icon.style.backgroundColor = getBlockColor(draggedItem.id);
-    }
-
-    const count = document.createElement("div");
-    count.className = "slot-count";
-    count.style.fontSize = "12px";
-    count.innerText = draggedItem.count.toString();
-
-    icon.appendChild(count);
-    dragIcon.appendChild(icon);
-  } else {
-    dragIcon.style.display = "none";
-  }
-}
-
-window.addEventListener("mousemove", (e) => {
-  if (draggedItem) {
-    dragIcon.style.left = e.clientX + "px";
-    dragIcon.style.top = e.clientY + "px";
-  }
-});
-
-window.addEventListener(
-  "touchmove",
-  (e) => {
-    if (draggedItem && isInventoryOpen) {
-      const touch = e.changedTouches[0];
-      dragIcon.style.left = touch.clientX + "px";
-      dragIcon.style.top = touch.clientY + "px";
-    }
-  },
-  { passive: false },
-);
-
-window.addEventListener("touchend", (e) => {
-  if (draggedItem && isInventoryOpen && touchStartSlotIndex !== null) {
-    const touch = e.changedTouches[0];
-    const target = document.elementFromPoint(touch.clientX, touch.clientY);
-    const slotEl = target?.closest(".slot");
-
-    if (slotEl) {
-      const targetIndex = parseInt(slotEl.getAttribute("data-index") || "-1");
-      // If dropped on a valid slot (even the same one), handle it
-      if (targetIndex !== -1) {
-        handleSlotClick(targetIndex);
-      }
-    } else {
-      // Dropped outside or invalid target - return to start slot
-      handleSlotClick(touchStartSlotIndex);
-    }
-
-    touchStartSlotIndex = null;
-  }
-});
-
-initInventoryUI();
-refreshInventoryUI();
-
-function onHotbarChange() {
-  refreshInventoryUI();
-  const slot = inventorySlots[selectedSlot];
-  if (slot && slot.id !== 0) {
-    hotbarLabel.show(BLOCK_NAMES[slot.id] || "Unknown Block");
-    playerHand.updateItem(slot.id);
-  } else {
-    hotbarLabel.hide();
-    playerHand.updateItem(0);
-  }
-}
-
+// Hotbar Input
 window.addEventListener("wheel", (event) => {
+  let selected = inventory.getSelectedSlot();
   if (event.deltaY > 0) {
-    selectedSlot = (selectedSlot + 1) % 9;
+    selected = (selected + 1) % 9;
   } else {
-    selectedSlot = (selectedSlot - 1 + 9) % 9;
+    selected = (selected - 1 + 9) % 9;
   }
-  onHotbarChange();
+  inventory.setSelectedSlot(selected);
+  inventoryUI.refresh();
+  if (inventoryUI.onInventoryChange) inventoryUI.onInventoryChange();
 });
 
 window.addEventListener("keydown", (event) => {
   const key = parseInt(event.key);
   if (key >= 1 && key <= 9) {
-    selectedSlot = key - 1;
-    onHotbarChange();
+    inventory.setSelectedSlot(key - 1);
+    inventoryUI.refresh();
+    if (inventoryUI.onInventoryChange) inventoryUI.onInventoryChange();
   }
 });
 
@@ -1400,7 +978,7 @@ const blockBreaking = new BlockBreaking(
   scene,
   camera,
   controls,
-  () => inventorySlots[selectedSlot].id,
+  () => inventory.getSelectedSlotItem().id,
   (x, y, z, id) => {
     // Drop Item
     if (id !== 0) {
@@ -1459,7 +1037,7 @@ const playerCombat = new PlayerCombat(
   camera,
   scene,
   controls,
-  () => inventorySlots[selectedSlot].id,
+  () => inventory.getSelectedSlotItem().id,
   cursorMesh,
   crackMesh,
 );
@@ -1469,17 +1047,18 @@ const blockInteraction = new BlockInteraction(
   camera,
   scene,
   controls,
-  () => inventorySlots[selectedSlot],
+  () => inventory.getSelectedSlotItem(),
   (x, y, z, id) => {
     world.setBlock(x, y, z, id);
 
-    const slot = inventorySlots[selectedSlot];
+    const index = inventory.getSelectedSlot();
+    const slot = inventory.getSlot(index);
     slot.count--;
     if (slot.count <= 0) {
       slot.id = 0;
       slot.count = 0;
     }
-    refreshInventoryUI();
+    inventoryUI.refresh();
     return true;
   },
   () => toggleInventory(true),
@@ -1557,32 +1136,12 @@ function animate() {
 
     if (entity.mesh.position.distanceTo(controls.object.position) < 2.5) {
       // Pickup logic
-      const type = entity.type;
-
-      // 1. Try to find existing slot with same type
-      let targetSlot = inventorySlots.find((s) => s.id === type);
-
-      // 2. If not found, find first empty slot
-      if (!targetSlot) {
-        targetSlot = inventorySlots.find((s) => s.id === 0);
-        if (targetSlot) {
-          targetSlot.id = type;
-          targetSlot.count = 0;
-        }
-      }
-
-      // 3. Add to slot if found
-      if (targetSlot) {
-        targetSlot.count++;
+      const added = inventory.addItem(entity.type, 1);
+      if (added) {
         entity.dispose();
         entities.splice(i, 1);
-
-        // Update Hotbar label if picking up to active slot
-        if (targetSlot === inventorySlots[selectedSlot]) {
-          onHotbarChange();
-        } else {
-          refreshInventoryUI();
-        }
+        inventoryUI.refresh();
+        if (inventoryUI.onInventoryChange) inventoryUI.onInventoryChange();
       }
     }
   }
@@ -2051,10 +1610,8 @@ async function startGame(loadSave: boolean) {
       controls.object.position.set(8, 40, 20); // Override respawn pos if needed
 
       // Clear inventory
-      for (let i = 0; i < 36; i++) {
-        inventorySlots[i] = { id: 0, count: 0 };
-      }
-      refreshInventoryUI();
+      inventory.clear();
+      inventoryUI.refresh();
     } else {
       const data = await world.loadWorld();
       if (data.playerPosition) {
@@ -2062,12 +1619,8 @@ async function startGame(loadSave: boolean) {
         playerPhysics.setVelocity(new THREE.Vector3(0, 0, 0));
       }
       if (data.inventory) {
-        for (let i = 0; i < 36; i++) {
-          if (data.inventory[i]) {
-            inventorySlots[i] = data.inventory[i];
-          }
-        }
-        refreshInventoryUI();
+        inventory.deserialize(data.inventory);
+        inventoryUI.refresh();
       }
     }
 
@@ -2115,7 +1668,7 @@ btnExit.addEventListener("click", async () => {
   // Save
   await world.saveWorld({
     position: controls.object.position,
-    inventory: inventorySlots,
+    inventory: inventory.serialize(),
   });
 
   // Return to main menu
@@ -2127,7 +1680,7 @@ setInterval(() => {
   if (gameState.getGameStarted() && !gameState.getPaused()) {
     world.saveWorld({
       position: controls.object.position,
-      inventory: inventorySlots,
+      inventory: inventory.serialize(),
     });
   }
 }, 30000);
