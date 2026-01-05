@@ -363,6 +363,7 @@ mobileCraftingList.id = "mobile-crafting-list";
 
 function initCraftingUI() {
   // Insert into menu
+  const inventoryGrid = document.getElementById("inventory-grid");
   inventoryMenu.insertBefore(craftingArea, inventoryGrid);
   if (isMobile) {
     document.body.appendChild(mobileCraftingList); // Append to body for absolute positioning
