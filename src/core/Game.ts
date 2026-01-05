@@ -14,6 +14,8 @@ import { BlockBreaking } from "../blocks/BlockBreaking";
 import { BlockInteraction } from "../blocks/BlockInteraction";
 import { Inventory } from "../inventory/Inventory";
 import { InventoryUI } from "../inventory/InventoryUI";
+import { CraftingSystem } from "../crafting/CraftingSystem";
+import { CraftingUI } from "../crafting/CraftingUI";
 
 /**
  * Главный класс игры, координирующий все системы
@@ -34,6 +36,8 @@ export class Game {
   public blockInteraction: BlockInteraction;
   public inventory: Inventory;
   public inventoryUI: InventoryUI;
+  public craftingSystem: CraftingSystem;
+  public craftingUI: CraftingUI;
 
   public isAttackPressed: boolean = false;
 
@@ -56,6 +60,8 @@ export class Game {
     blockInteraction: BlockInteraction,
     inventory: Inventory,
     inventoryUI: InventoryUI,
+    craftingSystem: CraftingSystem,
+    craftingUI: CraftingUI,
   ) {
     this.renderer = renderer;
     this.gameState = gameState;
@@ -72,6 +78,8 @@ export class Game {
     this.blockInteraction = blockInteraction;
     this.inventory = inventory;
     this.inventoryUI = inventoryUI;
+    this.craftingSystem = craftingSystem;
+    this.craftingUI = craftingUI;
   }
 
   /**
