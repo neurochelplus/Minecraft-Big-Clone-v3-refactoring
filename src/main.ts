@@ -41,6 +41,7 @@ initToolTextures();
 
 // Initialize Renderer (handles scene, camera, renderer, controls)
 const gameRenderer = new Renderer();
+const gameState = new GameState();
 const isMobile = gameRenderer.getIsMobile();
 
 // Get references to Three.js objects from Renderer
@@ -971,10 +972,6 @@ const blockCursor = new BlockCursor(scene, camera, controls);
 const cursorMesh = blockCursor.getMesh();
 
 // --- Block Breaking System ---
-
-// 1. Generate Crack Textures (Atlas)
-// We'll create a 10-frame atlas on a canvas
-// Block Breaking System
 const blockBreaking = new BlockBreaking(
   scene,
   camera,
@@ -1006,17 +1003,6 @@ const blockBreaking = new BlockBreaking(
 );
 const crackMesh = blockBreaking.getCrackMesh();
 
-// State
-let isAttackPressed = false;
-
-function updateBreaking(time: number) {
-  blockBreaking.update(time, world);
-}
-
-function startBreaking() {
-  blockBreaking.start(world);
-}
-
 // Player Health System
 const damageOverlay = document.getElementById("damage-overlay")!;
 const healthBarElement = document.getElementById("health-bar")!;
@@ -1033,6 +1019,7 @@ const playerHealth = new PlayerHealth(
     playerPhysics.setVelocity(new THREE.Vector3(0, 0, 0));
   },
 );
+
 // Combat System
 const playerCombat = new PlayerCombat(
   camera,
@@ -1067,6 +1054,25 @@ const blockInteraction = new BlockInteraction(
   crackMesh,
 );
 
+import { Game } from "./core/Game";
+const game = new Game(
+  gameRenderer,
+  gameState,
+  world,
+  environment,
+  entities,
+  mobManager,
+  playerHand,
+  playerPhysics,
+  playerHealth,
+  playerCombat,
+  blockCursor,
+  blockBreaking,
+  blockInteraction,
+  inventory,
+  inventoryUI,
+);
+
 function performInteract() {
   blockInteraction.interact(world);
 }
@@ -1077,112 +1083,22 @@ document.addEventListener("mousedown", (event) => {
   if (isInventoryOpen) return;
 
   if (event.button === 0) {
-    isAttackPressed = true;
+    game.isAttackPressed = true;
     playerHand.punch();
     playerCombat.performAttack(); // Hit mobs
-    startBreaking(); // Start mining block
+    game.blockBreaking.start(world); // Start mining block
   } else if (event.button === 2) performInteract();
 });
 
 document.addEventListener("mouseup", () => {
-  if (isAttackPressed) isAttackPressed = false;
+  game.isAttackPressed = false;
   playerHand.stopPunch();
   blockBreaking.stop();
 });
 
 // Player dimensions are handled in PlayerPhysics
 
-// Animation Loop
-let prevTime = performance.now();
-
-function animate() {
-  requestAnimationFrame(animate);
-
-  if (gameState.getPaused()) {
-    renderer.render(scene, camera);
-    return;
-  }
-
-  world.update(controls.object.position);
-
-  const time = performance.now();
-  const delta = (time - prevTime) / 1000;
-
-  environment.update(delta, controls.object.position);
-
-  // Player Hand Update
-  const isMoving =
-    (playerPhysics.moveForward ||
-      playerPhysics.moveBackward ||
-      playerPhysics.moveLeft ||
-      playerPhysics.moveRight) &&
-    playerPhysics.isOnGround;
-  playerHand.update(delta, isMoving);
-
-  updateBreaking(time);
-
-  if (isAttackPressed && !gameState.getPaused() && gameState.getGameStarted()) {
-    if (!blockBreaking.isBreakingNow()) startBreaking();
-    playerCombat.performAttack();
-  }
-  // Update Entities & Pickup
-  for (let i = entities.length - 1; i >= 0; i--) {
-    const entity = entities[i];
-    entity.update(time / 1000, delta);
-
-    if (entity.isDead) {
-      entities.splice(i, 1);
-      continue;
-    }
-
-    if (entity.mesh.position.distanceTo(controls.object.position) < 2.5) {
-      // Pickup logic
-      const added = inventory.addItem(entity.type, 1);
-      if (added) {
-        entity.dispose();
-        entities.splice(i, 1);
-        inventoryUI.refresh();
-        if (inventoryUI.onInventoryChange) inventoryUI.onInventoryChange();
-      }
-    }
-  }
-
-  // Update Mob Manager
-  mobManager.update(delta, controls.object.position, environment, (amt) =>
-    playerHealth.takeDamage(amt),
-  );
-
-  // Cursor Update
-  if (!gameState.getPaused() && gameState.getGameStarted()) {
-    blockCursor.update(world);
-  }
-
-  if (!gameState.getPaused() && gameState.getGameStarted()) {
-    // Safety: Don't apply physics if the current chunk isn't loaded yet
-    // This prevents falling through the world upon load/teleport
-    if (
-      !world.isChunkLoaded(
-        controls.object.position.x,
-        controls.object.position.z,
-      )
-    ) {
-      // Still update entities/mobs even if player is frozen, but skip player physics
-      // Actually, if we return here, we skip player movement code below.
-      // We rely on the global world.update() at start of animate() to keep loading chunks.
-      prevTime = time;
-      return;
-    }
-
-    playerPhysics.update(delta);
-  }
-
-  prevTime = time;
-
-  renderer.clear(); // Clear color & depth
-  renderer.render(scene, camera);
-  renderer.clearDepth(); // Clear depth for UI overlay
-  renderer.render(uiScene, uiCamera);
-}
+// Animation Loop removed, using Game.start() at the end
 
 // Window resize handled by Renderer class
 
@@ -1330,10 +1246,10 @@ if (isMobile) {
     lastAttackX = touch.clientX;
     lastAttackY = touch.clientY;
 
-    isAttackPressed = true;
+    game.isAttackPressed = true;
     playerHand.punch();
     playerCombat.performAttack();
-    startBreaking();
+    game.blockBreaking.start(world);
   });
 
   btnAttack.addEventListener("touchmove", (e) => {
@@ -1377,7 +1293,7 @@ if (isMobile) {
     }
 
     if (touchFound) {
-      isAttackPressed = false;
+      game.isAttackPressed = false;
       playerHand.stopPunch();
       blockBreaking.stop();
       attackTouchId = null;
@@ -1512,7 +1428,6 @@ if (isMobile) {
 }
 
 // --- Game State & Menus ---
-const gameState = new GameState();
 // GameState handles these variables now
 
 const mainMenu = document.getElementById("main-menu")!;
@@ -1571,7 +1486,7 @@ function hidePauseMenu() {
   pauseMenu.style.display = "none";
   settingsMenu.style.display = "none";
   if (!isMobile) controls.lock();
-  prevTime = performance.now();
+  game.resetTime();
 }
 
 function togglePauseMenu() {
@@ -1627,7 +1542,7 @@ async function startGame(loadSave: boolean) {
 
     gameState.setGameStarted(true);
     gameState.setPaused(false);
-    prevTime = performance.now();
+    game.resetTime();
     mainMenu.style.display = "none";
     pauseMenu.style.display = "none";
     settingsMenu.style.display = "none"; // Ensure settings are closed
@@ -1687,7 +1602,7 @@ setInterval(() => {
 }, 30000);
 
 // Start Animation Loop immediately, but it will respect gameState
-animate();
+game.start();
 
 // Initial State
 showMainMenu();

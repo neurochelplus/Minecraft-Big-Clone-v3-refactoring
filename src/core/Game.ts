@@ -1,24 +1,22 @@
-import * as THREE from 'three';
-import { Renderer } from './Renderer';
-import { GameState } from './GameState';
-import { World } from '../World';
-import { Environment } from '../Environment';
-import { ItemEntity } from '../ItemEntity';
-import { MobManager } from '../MobManager';
-import { PlayerHand } from '../PlayerHand';
+import * as THREE from "three";
+import { Renderer } from "./Renderer";
+import { GameState } from "./GameState";
+import { World } from "../World";
+import { Environment } from "../Environment";
+import { ItemEntity } from "../ItemEntity";
+import { MobManager } from "../MobManager";
+import { PlayerHand } from "../PlayerHand";
+import { PlayerPhysics } from "../player/PlayerPhysics";
+import { PlayerHealth } from "../player/PlayerHealth";
+import { PlayerCombat } from "../player/PlayerCombat";
+import { BlockCursor } from "../blocks/BlockCursor";
+import { BlockBreaking } from "../blocks/BlockBreaking";
+import { BlockInteraction } from "../blocks/BlockInteraction";
+import { Inventory } from "../inventory/Inventory";
+import { InventoryUI } from "../inventory/InventoryUI";
 
 /**
  * Главный класс игры, координирующий все системы
- * 
- * Этот класс будет использоваться для управления всеми системами игры:
- * - Рендеринг (Renderer)
- * - Состояние игры (GameState)
- * - Мир (World)
- * - Окружение (Environment)
- * - Игрок (Player системы)
- * - Инвентарь
- * - Блоки
- * - И т.д.
  */
 export class Game {
   public renderer: Renderer;
@@ -28,6 +26,16 @@ export class Game {
   public entities: ItemEntity[];
   public mobManager: MobManager;
   public playerHand: PlayerHand;
+  public playerPhysics: PlayerPhysics;
+  public playerHealth: PlayerHealth;
+  public playerCombat: PlayerCombat;
+  public blockCursor: BlockCursor;
+  public blockBreaking: BlockBreaking;
+  public blockInteraction: BlockInteraction;
+  public inventory: Inventory;
+  public inventoryUI: InventoryUI;
+
+  public isAttackPressed: boolean = false;
 
   private prevTime: number = performance.now();
   private animationId: number | null = null;
@@ -39,7 +47,15 @@ export class Game {
     environment: Environment,
     entities: ItemEntity[],
     mobManager: MobManager,
-    playerHand: PlayerHand
+    playerHand: PlayerHand,
+    playerPhysics: PlayerPhysics,
+    playerHealth: PlayerHealth,
+    playerCombat: PlayerCombat,
+    blockCursor: BlockCursor,
+    blockBreaking: BlockBreaking,
+    blockInteraction: BlockInteraction,
+    inventory: Inventory,
+    inventoryUI: InventoryUI,
   ) {
     this.renderer = renderer;
     this.gameState = gameState;
@@ -48,6 +64,14 @@ export class Game {
     this.entities = entities;
     this.mobManager = mobManager;
     this.playerHand = playerHand;
+    this.playerPhysics = playerPhysics;
+    this.playerHealth = playerHealth;
+    this.playerCombat = playerCombat;
+    this.blockCursor = blockCursor;
+    this.blockBreaking = blockBreaking;
+    this.blockInteraction = blockInteraction;
+    this.inventory = inventory;
+    this.inventoryUI = inventoryUI;
   }
 
   /**
@@ -57,6 +81,7 @@ export class Game {
     if (this.animationId !== null) {
       return; // Already started
     }
+    this.prevTime = performance.now();
     this.animate();
   }
 
@@ -70,60 +95,115 @@ export class Game {
     }
   }
 
+  public resetTime(): void {
+    this.prevTime = performance.now();
+  }
+
   /**
    * Основной игровой цикл
-   * 
-   * Этот метод будет вызываться каждый кадр и обновлять все системы.
-   * Полная реализация будет добавлена при интеграции всех систем.
    */
   private animate = (): void => {
     this.animationId = requestAnimationFrame(this.animate);
-
-    const time = performance.now();
-    const delta = (time - this.prevTime) / 1000;
-    this.prevTime = time;
 
     if (this.gameState.getPaused()) {
       this.renderer.renderOnlyMain();
       return;
     }
 
-    // Здесь будет обновление всех систем
-    // Пока что просто рендерим
-    this.renderer.render();
+    this.update();
+    this.render();
   };
 
   /**
    * Обновление игрового состояния
-   * Этот метод будет вызываться из animate() для обновления всех систем
    */
-  public update(delta: number): void {
-    // Обновление мира
-    this.world.update(this.renderer.controls.object.position);
+  private update(): void {
+    const time = performance.now();
+    const delta = (time - this.prevTime) / 1000;
 
-    // Обновление окружения
+    // World & Environment
+    this.world.update(this.renderer.controls.object.position);
     this.environment.update(delta, this.renderer.controls.object.position);
 
-    // Обновление менеджера мобов
-    // this.mobManager.update(delta, this.renderer.controls.object.position, this.environment, ...);
+    // Player Hand Update
+    const isMoving =
+      (this.playerPhysics.moveForward ||
+        this.playerPhysics.moveBackward ||
+        this.playerPhysics.moveLeft ||
+        this.playerPhysics.moveRight) &&
+      this.playerPhysics.isOnGround;
+    this.playerHand.update(delta, isMoving);
 
-    // Обновление сущностей
+    // Block Breaking
+    this.blockBreaking.update(time, this.world);
+
+    // Attack / Mining
+    if (this.isAttackPressed && this.gameState.getGameStarted()) {
+      if (!this.blockBreaking.isBreakingNow())
+        this.blockBreaking.start(this.world);
+      this.playerCombat.performAttack();
+    }
+
+    // Entities
     for (let i = this.entities.length - 1; i >= 0; i--) {
       const entity = this.entities[i];
-      const currentTime = performance.now() / 1000;
-      entity.update(currentTime, delta);
+      entity.update(time / 1000, delta);
 
       if (entity.isDead) {
         this.entities.splice(i, 1);
         continue;
       }
 
-      // Pickup logic будет здесь
+      if (
+        entity.mesh.position.distanceTo(
+          this.renderer.controls.object.position,
+        ) < 2.5
+      ) {
+        // Pickup logic
+        const added = this.inventory.addItem(entity.type, 1);
+        if (added) {
+          entity.dispose();
+          this.entities.splice(i, 1);
+          this.inventoryUI.refresh();
+          if (this.inventoryUI.onInventoryChange)
+            this.inventoryUI.onInventoryChange();
+        }
+      }
     }
 
-    // Обновление игрока (Physics, Combat, Health) будет здесь
-    // Обновление блоков (Cursor, Breaking, Interaction) будет здесь
-    // Обновление инвентаря будет здесь
+    // Mobs
+    this.mobManager.update(
+      delta,
+      this.renderer.controls.object.position,
+      this.environment,
+      (amt) => this.playerHealth.takeDamage(amt),
+    );
+
+    // Cursor
+    if (this.gameState.getGameStarted()) {
+      this.blockCursor.update(this.world);
+    }
+
+    // Physics
+    if (this.gameState.getGameStarted()) {
+      // Safety: Don't apply physics if the current chunk isn't loaded yet
+      if (
+        !this.world.isChunkLoaded(
+          this.renderer.controls.object.position.x,
+          this.renderer.controls.object.position.z,
+        )
+      ) {
+        this.prevTime = time;
+        return;
+      }
+
+      this.playerPhysics.update(delta);
+    }
+
+    this.prevTime = time;
+  }
+
+  private render(): void {
+    this.renderer.render();
   }
 }
-
