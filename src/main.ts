@@ -72,9 +72,9 @@ controls.addEventListener("unlock", () => {
     !isInventoryOpen &&
     !gameState.getPaused() &&
     gameState.getGameStarted() &&
-    !isCliOpen
+    !game.cli.isOpen
   ) {
-    showPauseMenu();
+    game.menus.showPauseMenu();
   }
 });
 
@@ -83,12 +83,12 @@ controls.addEventListener("unlock", () => {
 // Movement variables are now managed by PlayerPhysics
 
 const onKeyDown = (event: KeyboardEvent) => {
-  if (isCliOpen) return; // Ignore game keys when typing
+  if (game.cli.isOpen) return; // Ignore game keys when typing
 
   switch (event.code) {
     case "Slash":
       event.preventDefault();
-      toggleCLI(true, "/");
+      game.cli.toggle(true, "/");
       break;
     case "KeyT":
       if (
@@ -97,7 +97,7 @@ const onKeyDown = (event: KeyboardEvent) => {
         !isInventoryOpen
       ) {
         event.preventDefault();
-        toggleCLI(true, "");
+        game.cli.toggle(true, "");
       }
       break;
     case "ArrowUp":
@@ -124,7 +124,7 @@ const onKeyDown = (event: KeyboardEvent) => {
       break;
     case "Escape":
       if (isInventoryOpen) toggleInventory();
-      else togglePauseMenu();
+      else game.menus.togglePauseMenu();
       break;
   }
 };
@@ -210,101 +210,14 @@ const inventoryMenu = document.getElementById("inventory-menu")!;
 const hotbarLabelElement = document.getElementById("hotbar-label")!;
 const hotbarLabel = new HotbarLabel(hotbarLabelElement);
 
-// CLI Elements
-let isCliOpen = false;
-const cliContainer = document.createElement("div");
-cliContainer.id = "cli-container";
-const cliInput = document.createElement("input");
-cliInput.id = "cli-input";
-cliInput.type = "text";
-cliInput.autocomplete = "off";
-cliContainer.appendChild(cliInput);
-document.body.appendChild(cliContainer);
+// CLI Elements removed (handled by CLI class)
 
 // Disable context menu for right-click splitting
 document.addEventListener("contextmenu", (e) => {
   e.preventDefault();
 });
 
-function toggleCLI(open: boolean, initialChar: string = "") {
-  if (open) {
-    if (!gameState.getGameStarted()) return; // Don't open in menus
-    isCliOpen = true;
-    cliContainer.style.display = "flex";
-    cliInput.value = initialChar;
-    cliInput.focus();
-    controls.unlock();
-    // Clear move flags to stop walking when typing
-    playerPhysics.moveForward = false;
-    playerPhysics.moveBackward = false;
-    playerPhysics.moveLeft = false;
-    playerPhysics.moveRight = false;
-  } else {
-    isCliOpen = false;
-    cliContainer.style.display = "none";
-    cliInput.value = "";
-    cliInput.blur();
-    if (!isInventoryOpen && !gameState.getPaused()) controls.lock();
-  }
-}
-
-function handleCommand(cmd: string) {
-  if (!cmd.startsWith("/")) return;
-
-  const parts = cmd.slice(1).split(" ");
-  const command = parts[0].toLowerCase();
-  const args = parts.slice(1);
-
-  if (command === "give") {
-    if (args.length < 1) {
-      console.log("Usage: /give <item> [amount]");
-      hotbarLabel.show("Usage: /give <item> [amount]");
-      return;
-    }
-
-    const itemName = args[0].toLowerCase();
-    const amount = parseInt(args[1]) || 1;
-
-    // Find block ID by name
-    let targetId = 0;
-    // Using ITEM_MAP from constants/BlockNames.ts
-
-    if (ITEM_MAP[itemName]) {
-      targetId = ITEM_MAP[itemName];
-    } else {
-      // Try to find in BLOCK_NAMES (reverse lookup?)
-      // For now just numeric ID support too
-      const numericId = parseInt(itemName);
-      if (!isNaN(numericId) && BLOCK_NAMES[numericId]) {
-        targetId = numericId;
-      }
-    }
-
-    if (targetId !== 0) {
-      // Add to inventory
-      addItemToInventory(targetId, amount);
-      hotbarLabel.show(`Gave ${amount} ${BLOCK_NAMES[targetId]}`);
-    } else {
-      hotbarLabel.show(`Unknown item: ${itemName}`);
-    }
-  }
-}
-
-function addItemToInventory(id: number, count: number) {
-  inventory.addItem(id, count);
-  inventoryUI.refresh();
-}
-
-cliInput.addEventListener("keydown", (e) => {
-  e.stopPropagation(); // Stop game controls from triggering
-  if (e.key === "Enter") {
-    const cmd = cliInput.value.trim();
-    if (cmd) handleCommand(cmd);
-    toggleCLI(false);
-  } else if (e.key === "Escape") {
-    toggleCLI(false);
-  }
-});
+// CLI Functions removed (handled by CLI class)
 
 // Generate CSS Noise
 const canvas = document.createElement("canvas");
@@ -561,172 +474,11 @@ window.addEventListener("toggle-inventory", () => {
 });
 
 window.addEventListener("toggle-pause-menu", () => {
-  togglePauseMenu();
+  game.menus.togglePauseMenu();
 });
 
 // --- Game State & Menus ---
-// GameState handles these variables now
-
-const mainMenu = document.getElementById("main-menu")!;
-const pauseMenu = document.getElementById("pause-menu")!;
-const settingsMenu = document.getElementById("settings-menu")!;
-
-const btnNewGame = document.getElementById("btn-new-game")!;
-const btnContinue = document.getElementById("btn-continue")!;
-const btnResume = document.getElementById("btn-resume")!;
-const btnExit = document.getElementById("btn-exit")!;
-
-const btnSettingsMain = document.getElementById("btn-settings-main")!;
-const btnSettingsPause = document.getElementById("btn-settings-pause")!;
-const btnBackSettings = document.getElementById("btn-back-settings")!;
-const cbShadows = document.getElementById("cb-shadows") as HTMLInputElement;
-const cbClouds = document.getElementById("cb-clouds") as HTMLInputElement;
-
-function showMainMenu() {
-  gameState.setPaused(true);
-  gameState.setGameStarted(false);
-  mainMenu.style.display = "flex";
-  pauseMenu.style.display = "none";
-  settingsMenu.style.display = "none";
-  inventoryMenu.style.display = "none";
-  document.getElementById("ui-container")!.style.display = "none";
-  if (isMobile) document.getElementById("mobile-ui")!.style.display = "none";
-
-  controls.unlock();
-}
-
-function showPauseMenu() {
-  gameState.setPaused(true);
-  pauseMenu.style.display = "flex";
-  mainMenu.style.display = "none";
-  settingsMenu.style.display = "none";
-  controls.unlock();
-}
-
-function showSettingsMenu(fromMenu: HTMLElement) {
-  gameState.setPreviousMenu(fromMenu);
-  fromMenu.style.display = "none";
-  settingsMenu.style.display = "flex";
-}
-
-function hideSettingsMenu() {
-  settingsMenu.style.display = "none";
-  if (gameState.getPreviousMenu()) {
-    gameState.getPreviousMenu()!.style.display = "flex";
-  } else {
-    showMainMenu(); // Fallback
-  }
-}
-
-function hidePauseMenu() {
-  gameState.setPaused(false);
-  pauseMenu.style.display = "none";
-  settingsMenu.style.display = "none";
-  if (!isMobile) controls.lock();
-  game.resetTime();
-}
-
-function togglePauseMenu() {
-  if (!gameState.getGameStarted()) return;
-
-  // If we are in settings, Go back to pause menu first?
-  // Or just close everything? Let's close everything or go to pause.
-  if (settingsMenu.style.display === "flex") {
-    hideSettingsMenu();
-    return;
-  }
-
-  if (gameState.getPaused()) {
-    hidePauseMenu();
-  } else {
-    showPauseMenu();
-  }
-}
-
-async function startGame(loadSave: boolean) {
-  if (!isMobile) {
-    // Must lock immediately on user gesture
-    controls.lock();
-  }
-
-  // Show Loading
-  btnNewGame.innerText = "Loading...";
-  btnContinue.innerText = "Loading...";
-
-  console.log("Starting game...", loadSave ? "(Loading)" : "(New Game)");
-
-  try {
-    if (!loadSave) {
-      await world.deleteWorld();
-      // Reset player state
-      playerHealth.respawn();
-      controls.object.position.set(8, 40, 20); // Override respawn pos if needed
-
-      // Clear inventory
-      inventory.clear();
-      inventoryUI.refresh();
-    } else {
-      const data = await world.loadWorld();
-      if (data.playerPosition) {
-        controls.object.position.copy(data.playerPosition);
-        playerPhysics.setVelocity(new THREE.Vector3(0, 0, 0));
-      }
-      if (data.inventory) {
-        inventory.deserialize(data.inventory);
-        inventoryUI.refresh();
-      }
-    }
-
-    gameState.setGameStarted(true);
-    gameState.setPaused(false);
-    game.resetTime();
-    mainMenu.style.display = "none";
-    pauseMenu.style.display = "none";
-    settingsMenu.style.display = "none"; // Ensure settings are closed
-    document.getElementById("ui-container")!.style.display = "flex";
-    if (isMobile) {
-      document.getElementById("mobile-ui")!.style.display = "block";
-      document.documentElement.requestFullscreen().catch(() => {});
-    }
-  } catch (e) {
-    console.error("Failed to start game:", e);
-    alert("Error starting game: " + e);
-    // Unlock if failed so user can see alert/menu
-    if (!isMobile) controls.unlock();
-  } finally {
-    btnNewGame.innerText = "New Game";
-    btnContinue.innerText = "Continue";
-  }
-}
-
-// Settings Logic
-cbShadows.addEventListener("change", () => {
-  environment.setShadowsEnabled(cbShadows.checked);
-});
-
-cbClouds.addEventListener("change", () => {
-  environment.setCloudsEnabled(cbClouds.checked);
-});
-
-// Menu Listeners
-btnNewGame.addEventListener("click", () => startGame(false));
-btnContinue.addEventListener("click", () => startGame(true));
-btnResume.addEventListener("click", () => hidePauseMenu());
-
-btnSettingsMain.addEventListener("click", () => showSettingsMenu(mainMenu));
-btnSettingsPause.addEventListener("click", () => showSettingsMenu(pauseMenu));
-btnBackSettings.addEventListener("click", () => hideSettingsMenu());
-
-btnExit.addEventListener("click", async () => {
-  // Save
-  await world.saveWorld({
-    position: controls.object.position,
-    inventory: inventory.serialize(),
-  });
-
-  // Return to main menu
-  showMainMenu();
-});
+// Menu Logic removed (handled by Menus class)
 
 // Auto-save loop
 setInterval(() => {
@@ -741,5 +493,5 @@ setInterval(() => {
 // Start Animation Loop immediately, but it will respect gameState
 game.start();
 
-// Initial State
-showMainMenu();
+// Initial State (Menus class handles this in start(), but we can ensure it's hidden or show it if game.start() doesn't)
+// game.start() calls menus.showMainMenu();

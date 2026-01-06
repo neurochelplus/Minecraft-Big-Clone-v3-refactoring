@@ -17,6 +17,8 @@ import { InventoryUI } from "../inventory/InventoryUI";
 import { CraftingSystem } from "../crafting/CraftingSystem";
 import { CraftingUI } from "../crafting/CraftingUI";
 import { MobileControls } from "../mobile/MobileControls";
+import { CLI } from "../ui/CLI";
+import { Menus } from "../ui/Menus";
 
 /**
  * Главный класс игры, координирующий все системы
@@ -40,6 +42,8 @@ export class Game {
   public craftingSystem: CraftingSystem;
   public craftingUI: CraftingUI;
   public mobileControls: MobileControls | null = null;
+  public cli: CLI;
+  public menus: Menus;
 
   public isAttackPressed: boolean = false;
 
@@ -83,6 +87,10 @@ export class Game {
     this.craftingSystem = craftingSystem;
     this.craftingUI = craftingUI;
 
+    // UI Systems
+    this.cli = new CLI(this);
+    this.menus = new Menus(this);
+
     // Initialize Mobile Controls if needed
     if (this.renderer.getIsMobile()) {
       this.mobileControls = new MobileControls(this);
@@ -96,6 +104,10 @@ export class Game {
     if (this.animationId !== null) {
       return; // Already started
     }
+
+    // Show Main Menu initially
+    this.menus.showMainMenu();
+
     this.prevTime = performance.now();
     this.animate();
   }
