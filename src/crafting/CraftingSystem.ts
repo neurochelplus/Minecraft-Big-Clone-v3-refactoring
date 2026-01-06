@@ -1,4 +1,4 @@
-import { RECIPES } from "../Recipes";
+import { RECIPES } from "./Recipes";
 
 export interface CraftingSlot {
   id: number;

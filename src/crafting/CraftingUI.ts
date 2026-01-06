@@ -2,9 +2,9 @@ import { CraftingSystem } from "./CraftingSystem";
 import { Inventory } from "../inventory/Inventory";
 import { InventoryUI } from "../inventory/InventoryUI";
 import { DragDrop } from "../inventory/DragDrop";
-import { TOOL_TEXTURES } from "../ToolTextures";
+import { TOOL_TEXTURES } from "../constants/ToolTextures";
 import { getBlockColor } from "../utils/BlockColors";
-import { RECIPES } from "../Recipes";
+import { RECIPES } from "./Recipes";
 
 export class CraftingUI {
   private craftingSystem: CraftingSystem;
@@ -25,7 +25,7 @@ export class CraftingUI {
     inventory: Inventory,
     inventoryUI: InventoryUI,
     dragDrop: DragDrop,
-    isMobile: boolean
+    isMobile: boolean,
   ) {
     this.craftingSystem = craftingSystem;
     this.inventory = inventory;
@@ -205,7 +205,11 @@ export class CraftingUI {
       this.resultIcon.style.display = "block";
 
       // Cleanup classes
-      this.resultIcon.classList.remove("item-stick", "item-planks", "item-tool");
+      this.resultIcon.classList.remove(
+        "item-stick",
+        "item-planks",
+        "item-tool",
+      );
       this.resultIcon.style.backgroundImage = "";
 
       if (TOOL_TEXTURES[result.id]) {
@@ -446,16 +450,16 @@ export class CraftingUI {
   }
 
   public setVisible(visible: boolean, isCraftingTable: boolean) {
-      if (visible) {
-        this.craftingArea.style.display = this.isMobile ? "none" : "flex";
-        this.mobileCraftingList.style.display = this.isMobile ? "flex" : "none";
-        this.craftingSystem.setCraftingTable(isCraftingTable);
-        this.updateCraftingGridSize();
-        this.updateVisuals();
-      } else {
-          if (this.isMobile) {
-              this.mobileCraftingList.style.display = "none";
-          }
+    if (visible) {
+      this.craftingArea.style.display = this.isMobile ? "none" : "flex";
+      this.mobileCraftingList.style.display = this.isMobile ? "flex" : "none";
+      this.craftingSystem.setCraftingTable(isCraftingTable);
+      this.updateCraftingGridSize();
+      this.updateVisuals();
+    } else {
+      if (this.isMobile) {
+        this.mobileCraftingList.style.display = "none";
       }
+    }
   }
 }

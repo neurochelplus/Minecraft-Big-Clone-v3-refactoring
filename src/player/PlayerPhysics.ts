@@ -1,13 +1,19 @@
-import * as THREE from 'three';
-import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
-import { World } from '../World';
-import { GRAVITY, JUMP_IMPULSE, PLAYER_HALF_WIDTH, PLAYER_HEIGHT, PLAYER_EYE_HEIGHT } from '../constants/GameConstants';
+import * as THREE from "three";
+import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
+import { World } from "../world/World";
+import {
+  GRAVITY,
+  JUMP_IMPULSE,
+  PLAYER_HALF_WIDTH,
+  PLAYER_HEIGHT,
+  PLAYER_EYE_HEIGHT,
+} from "../constants/GameConstants";
 
 export class PlayerPhysics {
   private controls: PointerLockControls;
   private world: World;
   private velocity: THREE.Vector3;
-  
+
   // Movement state
   public moveForward = false;
   public moveBackward = false;
@@ -113,7 +119,12 @@ export class PlayerPhysics {
     if (moveDir.lengthSq() > 0) moveDir.normalize();
 
     // Acceleration & Friction
-    if (this.moveForward || this.moveBackward || this.moveLeft || this.moveRight) {
+    if (
+      this.moveForward ||
+      this.moveBackward ||
+      this.moveLeft ||
+      this.moveRight
+    ) {
       this.velocity.x += moveDir.x * this.speed * safeDelta;
       this.velocity.z += moveDir.z * this.speed * safeDelta;
     }
@@ -163,4 +174,3 @@ export class PlayerPhysics {
     }
   }
 }
-

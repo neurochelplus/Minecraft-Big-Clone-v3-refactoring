@@ -60,9 +60,15 @@ export class Menus {
     this.btnContinue.addEventListener("click", () => this.startGame(true));
     this.btnResume.addEventListener("click", () => this.hidePauseMenu());
 
-    this.btnSettingsMain.addEventListener("click", () => this.showSettingsMenu(this.mainMenu));
-    this.btnSettingsPause.addEventListener("click", () => this.showSettingsMenu(this.pauseMenu));
-    this.btnBackSettings.addEventListener("click", () => this.hideSettingsMenu());
+    this.btnSettingsMain.addEventListener("click", () =>
+      this.showSettingsMenu(this.mainMenu),
+    );
+    this.btnSettingsPause.addEventListener("click", () =>
+      this.showSettingsMenu(this.pauseMenu),
+    );
+    this.btnBackSettings.addEventListener("click", () =>
+      this.hideSettingsMenu(),
+    );
 
     this.btnExit.addEventListener("click", async () => {
       await this.game.world.saveWorld({
@@ -102,7 +108,7 @@ export class Menus {
     this.settingsMenu.style.display = "none";
 
     if (!this.game.renderer.getIsMobile()) {
-        this.game.renderer.controls.lock();
+      this.game.renderer.controls.lock();
     }
 
     this.game.resetTime();
@@ -150,7 +156,7 @@ export class Menus {
     try {
       if (!loadSave) {
         await this.game.world.deleteWorld();
-        this.game.playerHealth.respawn();
+        this.game.player.health.respawn();
         this.game.renderer.controls.object.position.set(8, 40, 20);
         this.game.inventory.clear();
         this.game.inventoryUI.refresh();
@@ -158,7 +164,7 @@ export class Menus {
         const data = await this.game.world.loadWorld();
         if (data.playerPosition) {
           this.game.renderer.controls.object.position.copy(data.playerPosition);
-          this.game.playerPhysics.setVelocity({ x: 0, y: 0, z: 0 } as any); // Reset velocity
+          this.game.player.physics.setVelocity({ x: 0, y: 0, z: 0 } as any); // Reset velocity
         }
         if (data.inventory) {
           this.game.inventory.deserialize(data.inventory);
@@ -182,7 +188,8 @@ export class Menus {
     } catch (e) {
       console.error("Failed to start game:", e);
       alert("Error starting game: " + e);
-      if (!this.game.renderer.getIsMobile()) this.game.renderer.controls.unlock();
+      if (!this.game.renderer.getIsMobile())
+        this.game.renderer.controls.unlock();
     } finally {
       this.btnNewGame.innerText = "New Game";
       this.btnContinue.innerText = "Continue";

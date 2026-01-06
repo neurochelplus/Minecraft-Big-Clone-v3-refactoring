@@ -1,14 +1,11 @@
 import * as THREE from "three";
 import { Renderer } from "./Renderer";
 import { GameState } from "./GameState";
-import { World } from "../World";
-import { Environment } from "../Environment";
-import { ItemEntity } from "../ItemEntity";
-import { MobManager } from "../MobManager";
-import { PlayerHand } from "../PlayerHand";
-import { PlayerPhysics } from "../player/PlayerPhysics";
-import { PlayerHealth } from "../player/PlayerHealth";
-import { PlayerCombat } from "../player/PlayerCombat";
+import { World } from "../world/World";
+import { Environment } from "../world/Environment";
+import { ItemEntity } from "../entities/ItemEntity";
+import { MobManager } from "../mobs/MobManager";
+import { Player } from "../player/Player";
 import { BlockCursor } from "../blocks/BlockCursor";
 import { BlockBreaking } from "../blocks/BlockBreaking";
 import { BlockInteraction } from "../blocks/BlockInteraction";
@@ -30,10 +27,7 @@ export class Game {
   public environment: Environment;
   public entities: ItemEntity[];
   public mobManager: MobManager;
-  public playerHand: PlayerHand;
-  public playerPhysics: PlayerPhysics;
-  public playerHealth: PlayerHealth;
-  public playerCombat: PlayerCombat;
+  public player: Player;
   public blockCursor: BlockCursor;
   public blockBreaking: BlockBreaking;
   public blockInteraction: BlockInteraction;
@@ -57,10 +51,7 @@ export class Game {
     environment: Environment,
     entities: ItemEntity[],
     mobManager: MobManager,
-    playerHand: PlayerHand,
-    playerPhysics: PlayerPhysics,
-    playerHealth: PlayerHealth,
-    playerCombat: PlayerCombat,
+    player: Player,
     blockCursor: BlockCursor,
     blockBreaking: BlockBreaking,
     blockInteraction: BlockInteraction,
@@ -75,10 +66,7 @@ export class Game {
     this.environment = environment;
     this.entities = entities;
     this.mobManager = mobManager;
-    this.playerHand = playerHand;
-    this.playerPhysics = playerPhysics;
-    this.playerHealth = playerHealth;
-    this.playerCombat = playerCombat;
+    this.player = player;
     this.blockCursor = blockCursor;
     this.blockBreaking = blockBreaking;
     this.blockInteraction = blockInteraction;
@@ -152,14 +140,8 @@ export class Game {
     this.world.update(this.renderer.controls.object.position);
     this.environment.update(delta, this.renderer.controls.object.position);
 
-    // Player Hand Update
-    const isMoving =
-      (this.playerPhysics.moveForward ||
-        this.playerPhysics.moveBackward ||
-        this.playerPhysics.moveLeft ||
-        this.playerPhysics.moveRight) &&
-      this.playerPhysics.isOnGround;
-    this.playerHand.update(delta, isMoving);
+    // Player Update (Physics & Hand)
+    this.player.update(delta);
 
     // Block Breaking
     this.blockBreaking.update(time, this.world);
@@ -168,7 +150,7 @@ export class Game {
     if (this.isAttackPressed && this.gameState.getGameStarted()) {
       if (!this.blockBreaking.isBreakingNow())
         this.blockBreaking.start(this.world);
-      this.playerCombat.performAttack();
+      this.player.combat.performAttack();
     }
 
     // Entities
@@ -203,28 +185,12 @@ export class Game {
       delta,
       this.renderer.controls.object.position,
       this.environment,
-      (amt) => this.playerHealth.takeDamage(amt),
+      (amt) => this.player.health.takeDamage(amt),
     );
 
     // Cursor
     if (this.gameState.getGameStarted()) {
       this.blockCursor.update(this.world);
-    }
-
-    // Physics
-    if (this.gameState.getGameStarted()) {
-      // Safety: Don't apply physics if the current chunk isn't loaded yet
-      if (
-        !this.world.isChunkLoaded(
-          this.renderer.controls.object.position.x,
-          this.renderer.controls.object.position.z,
-        )
-      ) {
-        this.prevTime = time;
-        return;
-      }
-
-      this.playerPhysics.update(delta);
     }
 
     this.prevTime = time;

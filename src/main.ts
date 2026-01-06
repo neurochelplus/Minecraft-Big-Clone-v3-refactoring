@@ -1,20 +1,17 @@
 import { Renderer } from "./core/Renderer";
 import { GameState } from "./core/GameState";
-import { World } from "./World";
-import { ItemEntity } from "./ItemEntity";
-import { initToolTextures, TOOL_TEXTURES } from "./ToolTextures";
-import { MobManager } from "./MobManager";
-import { PlayerHand } from "./PlayerHand";
+import { World } from "./world/World";
+import { ItemEntity } from "./entities/ItemEntity";
+import { initToolTextures, TOOL_TEXTURES } from "./constants/ToolTextures";
+import { MobManager } from "./mobs/MobManager";
+import { Player } from "./player/Player";
 import { Inventory } from "./inventory/Inventory";
 import { DragDrop } from "./inventory/DragDrop";
 import { InventoryUI } from "./inventory/InventoryUI";
 import { CraftingSystem } from "./crafting/CraftingSystem";
 import { CraftingUI } from "./crafting/CraftingUI";
-import { Environment } from "./Environment";
-import { initDebugControls } from "./DebugUtils";
-import { PlayerPhysics } from "./player/PlayerPhysics";
-import { PlayerHealth } from "./player/PlayerHealth";
-import { PlayerCombat } from "./player/PlayerCombat";
+import { Environment } from "./world/Environment";
+import { initDebugControls } from "./utils/DebugUtils";
 import { BlockCursor } from "./blocks/BlockCursor";
 import { BlockBreaking } from "./blocks/BlockBreaking";
 import { BlockInteraction } from "./blocks/BlockInteraction";
@@ -46,71 +43,28 @@ initDebugControls(environment);
 // World Generation
 const world = new World(scene);
 
-// Initialize PlayerPhysics
-const playerPhysics = new PlayerPhysics(controls, world);
+// Initialize Player
+const damageOverlay = document.getElementById("damage-overlay")!;
+const healthBarElement = document.getElementById("health-bar")!;
+const healthBar = new HealthBar(healthBarElement);
 
-const entities: ItemEntity[] = [];
-const mobManager = new MobManager(world, scene, entities);
+// Interaction (needed for Player)
+const blockCursor = new BlockCursor(scene, camera, controls);
+const cursorMesh = blockCursor.getMesh();
 
-// UI Lighting
-const uiScene = gameRenderer.uiScene;
-const uiLight = new THREE.DirectionalLight(0xffffff, 1.5);
-uiLight.position.set(1, 1, 1);
-uiScene.add(uiLight);
-const uiAmbient = new THREE.AmbientLight(0xffffff, 0.5);
-uiScene.add(uiAmbient);
-
-const playerHand = new PlayerHand(uiCamera, world.noiseTexture, TOOL_TEXTURES);
-
-// Inventory System
+// Inventory System (needed for Player)
 const inventory = new Inventory();
 const dragDrop = new DragDrop();
 const inventoryUI = new InventoryUI(inventory, dragDrop, isMobile);
 
-// Crafting System
-const craftingSystem = new CraftingSystem();
-const craftingUI = new CraftingUI(
-  craftingSystem,
-  inventory,
-  inventoryUI,
-  dragDrop,
-  isMobile,
-);
+// --- Block Breaking System --- (needed for Player ctor as crackMesh placeholder, but wait, crackMesh is created by BlockBreaking)
+// Actually PlayerCombat uses crackMesh.
+// But BlockBreaking creates it.
+// We need to resolve this dependency cycle or ordering.
+// BlockBreaking needs inventory to get selected item ID.
+// Player needs crackMesh for Combat (visuals).
 
-// UI Components
-const hotbarLabelElement = document.getElementById("hotbar-label")!;
-const hotbarLabel = new HotbarLabel(hotbarLabelElement);
-
-// Connect Inventory to PlayerHand and HotbarLabel
-inventoryUI.onInventoryChange = () => {
-  const slot = inventory.getSelectedSlotItem();
-  playerHand.updateItem(slot.id);
-  if (slot.id !== 0) {
-    hotbarLabel.show(BLOCK_NAMES[slot.id] || "Block");
-  } else {
-    hotbarLabel.hide();
-  }
-
-  // Update crafting visuals if needed (handled by UI classes usually, but trigger here)
-  // We need to know if inventory is open. Game instance not ready yet?
-  // We can pass a callback or rely on Game update loop.
-  // Ideally InventoryUI should emit an event or CraftingUI should listen.
-  // For now, we will leave it as is, or use the `game` instance after creation.
-  if (game && game.menus) {
-    // Check if inventory menu is visible.
-    // Accessing DOM directly is quick fix for now.
-    const invMenu = document.getElementById("inventory-menu");
-    if (invMenu && invMenu.style.display === "flex") {
-      craftingUI.updateVisuals();
-    }
-  }
-};
-
-// Interaction
-const blockCursor = new BlockCursor(scene, camera, controls);
-const cursorMesh = blockCursor.getMesh();
-
-// --- Block Breaking System ---
+// Let's init BlockBreaking first.
 const blockBreaking = new BlockBreaking(
   scene,
   camera,
@@ -142,32 +96,66 @@ const blockBreaking = new BlockBreaking(
 );
 const crackMesh = blockBreaking.getCrackMesh();
 
-// Player Health System
-const damageOverlay = document.getElementById("damage-overlay")!;
-const healthBarElement = document.getElementById("health-bar")!;
-const healthBar = new HealthBar(healthBarElement);
-
-const playerHealth = new PlayerHealth(
-  damageOverlay,
-  healthBar,
-  camera,
+const player = new Player(
   controls,
-  (pos) => playerPhysics.checkCollision(pos),
-  () => {
-    // onRespawn
-    playerPhysics.setVelocity(new THREE.Vector3(0, 0, 0));
-  },
-);
-
-// Combat System
-const playerCombat = new PlayerCombat(
+  world,
   camera,
   scene,
-  controls,
+  uiCamera,
   () => inventory.getSelectedSlotItem().id,
   cursorMesh,
   crackMesh,
+  damageOverlay,
+  healthBar,
+  world.noiseTexture,
+  TOOL_TEXTURES,
 );
+
+const entities: ItemEntity[] = [];
+const mobManager = new MobManager(world, scene, entities);
+
+// UI Lighting
+const uiScene = gameRenderer.uiScene;
+const uiLight = new THREE.DirectionalLight(0xffffff, 1.5);
+uiLight.position.set(1, 1, 1);
+uiScene.add(uiLight);
+const uiAmbient = new THREE.AmbientLight(0xffffff, 0.5);
+uiScene.add(uiAmbient);
+
+// Crafting System
+const craftingSystem = new CraftingSystem();
+const craftingUI = new CraftingUI(
+  craftingSystem,
+  inventory,
+  inventoryUI,
+  dragDrop,
+  isMobile,
+);
+
+// UI Components
+const hotbarLabelElement = document.getElementById("hotbar-label")!;
+const hotbarLabel = new HotbarLabel(hotbarLabelElement);
+
+// Connect Inventory to PlayerHand and HotbarLabel
+inventoryUI.onInventoryChange = () => {
+  const slot = inventory.getSelectedSlotItem();
+  player.hand.updateItem(slot.id);
+  if (slot.id !== 0) {
+    hotbarLabel.show(BLOCK_NAMES[slot.id] || "Block");
+  } else {
+    hotbarLabel.hide();
+  }
+
+  // Update crafting visuals if needed (handled by UI classes usually, but trigger here)
+  if (game && game.menus) {
+    // Check if inventory menu is visible.
+    // Accessing DOM directly is quick fix for now.
+    const invMenu = document.getElementById("inventory-menu");
+    if (invMenu && invMenu.style.display === "flex") {
+      craftingUI.updateVisuals();
+    }
+  }
+};
 
 // Block Interaction
 const blockInteraction = new BlockInteraction(
@@ -188,7 +176,7 @@ const blockInteraction = new BlockInteraction(
     inventoryUI.refresh();
     return true;
   },
-  () => toggleInventory(true), // Forward reference fix needed?
+  () => toggleInventory(true),
   cursorMesh,
   crackMesh,
 );
@@ -200,10 +188,7 @@ const game = new Game(
   environment,
   entities,
   mobManager,
-  playerHand,
-  playerPhysics,
-  playerHealth,
-  playerCombat,
+  player,
   blockCursor,
   blockBreaking,
   blockInteraction,
@@ -216,13 +201,6 @@ const game = new Game(
 // Toggle Inventory Helper
 function toggleInventory(useCraftingTable = false) {
   if (game.inventoryUI) {
-    // We need a way to check if it's open. The logic was in main.ts.
-    // It should probably be in Game or InventoryUI/Menus.
-    // For now, we reimplement basic toggle using the DOM element state or similar.
-    // Or better, move this logic to a method in Game.ts?
-    // Since we are cleaning up main.ts, let's move this logic to Game.ts in the future.
-    // For this step, we keep it but cleaned.
-
     const inventoryMenu = document.getElementById("inventory-menu")!;
     const isInventoryOpen = inventoryMenu.style.display === "flex";
 
@@ -260,8 +238,7 @@ function toggleInventory(useCraftingTable = false) {
       });
 
       // Return items
-      craftingSystem.consumeIngredients(); // Wait, logic was: return items to inventory.
-      // The previous logic manually returned items.
+      craftingSystem.consumeIngredients();
       for (let i = 0; i < 9; i++) {
         if (craftingSystem.craftingSlots[i].id !== 0) {
           inventory.addItem(
@@ -334,22 +311,22 @@ const onKeyDown = (event: KeyboardEvent) => {
       break;
     case "ArrowUp":
     case "KeyW":
-      playerPhysics.moveForward = true;
+      player.physics.moveForward = true;
       break;
     case "ArrowLeft":
     case "KeyA":
-      playerPhysics.moveLeft = true;
+      player.physics.moveLeft = true;
       break;
     case "ArrowDown":
     case "KeyS":
-      playerPhysics.moveBackward = true;
+      player.physics.moveBackward = true;
       break;
     case "ArrowRight":
     case "KeyD":
-      playerPhysics.moveRight = true;
+      player.physics.moveRight = true;
       break;
     case "Space":
-      playerPhysics.jump();
+      player.physics.jump();
       break;
     case "KeyE":
       if (!gameState.getPaused()) toggleInventory(false);
@@ -366,19 +343,19 @@ const onKeyUp = (event: KeyboardEvent) => {
   switch (event.code) {
     case "ArrowUp":
     case "KeyW":
-      playerPhysics.moveForward = false;
+      player.physics.moveForward = false;
       break;
     case "ArrowLeft":
     case "KeyA":
-      playerPhysics.moveLeft = false;
+      player.physics.moveLeft = false;
       break;
     case "ArrowDown":
     case "KeyS":
-      playerPhysics.moveBackward = false;
+      player.physics.moveBackward = false;
       break;
     case "ArrowRight":
     case "KeyD":
-      playerPhysics.moveRight = false;
+      player.physics.moveRight = false;
       break;
   }
 };
@@ -403,15 +380,15 @@ document.addEventListener("mousedown", (event) => {
 
   if (event.button === 0) {
     game.isAttackPressed = true;
-    playerHand.punch();
-    playerCombat.performAttack();
+    player.hand.punch();
+    player.combat.performAttack();
     game.blockBreaking.start(world);
   } else if (event.button === 2) performInteract();
 });
 
 document.addEventListener("mouseup", () => {
   game.isAttackPressed = false;
-  playerHand.stopPunch();
+  player.hand.stopPunch();
   blockBreaking.stop();
 });
 

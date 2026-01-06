@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { PerspectiveCamera } from "three";
 import { Scene } from "three";
-import { World, BLOCK } from "../World";
+import { World, BLOCK } from "../world/World";
 
 export class BlockBreaking {
   private crackMesh: THREE.Mesh;
